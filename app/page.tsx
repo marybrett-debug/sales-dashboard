@@ -156,9 +156,18 @@ function computeChannelData(
     const l4lRev = m.slice(0, lastMonthWithData + 1).reduce((s, r) => s + r.revenue, 0)
     const l4lOrd = m.slice(0, lastMonthWithData + 1).reduce((s, r) => s + r.orders, 0)
     const isPartial = year === latestYear && lastMonthWithData < 11
+    // Seasonal weights: Q1 & Q4 are peak (growing season planning), Q2 slows, Q3 builds momentum
+    // Weights represent relative share of annual revenue per month
+    const seasonalWeights = [
+      0.12, 0.11, 0.10,   // Q1 (Jan-Mar): peak — 33%
+      0.06, 0.05, 0.05,   // Q2 (Apr-Jun): slow — 16%
+      0.07, 0.08, 0.08,   // Q3 (Jul-Sep): building — 23%
+      0.09, 0.10, 0.09,   // Q4 (Oct-Dec): peak — 28%
+    ]
     const monthsWithData = lastMonthWithData + 1
-    const forecastRev = isPartial ? Math.round(rev / monthsWithData * 12) : rev
-    const forecastOrd = isPartial ? Math.round(ord / monthsWithData * 12) : ord
+    const weightOfDataMonths = seasonalWeights.slice(0, monthsWithData).reduce((a, b) => a + b, 0)
+    const forecastRev = isPartial ? Math.round(rev / weightOfDataMonths) : rev
+    const forecastOrd = isPartial ? Math.round(ord / weightOfDataMonths) : ord
     yearTotals.set(year, {
       revenue: rev, orders: ord, avgOrder: ord > 0 ? rev / ord : 0,
       likeForLikeRevenue: l4lRev, likeForLikeOrders: l4lOrd,
