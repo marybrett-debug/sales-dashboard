@@ -39,6 +39,7 @@ async function ensureTables() {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_orders_file ON sd_orders(file_id)`
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sd_orders_dedup ON sd_orders(file_id, order_date, channel, is_count_only)`
 
   await sql`
     CREATE TABLE IF NOT EXISTS sd_strains (
@@ -54,6 +55,7 @@ async function ensureTables() {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_strains_file ON sd_strains(file_id)`
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sd_strains_dedup ON sd_strains(file_id, item, strain, pack_size, channel, year)`
 }
 
 /* ── POST: save uploaded data ─────────────────────────────── */
@@ -77,23 +79,23 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as SaveBody
     const region = body.region || 'usa'
 
-    // Replace if same filename+region already exists
+    // Reuse existing file record if same filename+region, otherwise create new
+    let fileId: number
     const existing = await sql`
       SELECT id FROM sd_files WHERE filename = ${body.filename} AND region = ${region}
     `
     if (existing.length > 0) {
-      const fileId = existing[0].id as number
-      await sql`DELETE FROM sd_orders WHERE file_id = ${fileId}`
-      await sql`DELETE FROM sd_strains WHERE file_id = ${fileId}`
-      await sql`DELETE FROM sd_files WHERE id = ${fileId}`
+      fileId = existing[0].id as number
+      // Update metadata but keep existing data
+      await sql`UPDATE sd_files SET uploaded_by = ${email}, uploaded_at = NOW() WHERE id = ${fileId}`
+    } else {
+      const [fileRow] = await sql`
+        INSERT INTO sd_files (filename, region, channel, file_type, uploaded_by)
+        VALUES (${body.filename}, ${region}, ${body.channel}, ${body.fileType}, ${email})
+        RETURNING id
+      `
+      fileId = fileRow.id as number
     }
-
-    const [fileRow] = await sql`
-      INSERT INTO sd_files (filename, region, channel, file_type, uploaded_by)
-      VALUES (${body.filename}, ${region}, ${body.channel}, ${body.fileType}, ${email})
-      RETURNING id
-    `
-    const fileId = fileRow.id as number
 
     if (body.orders && body.orders.length > 0) {
       const batchSize = 200
@@ -102,7 +104,7 @@ export async function POST(req: NextRequest) {
         const values = batch.map(o =>
           `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'})`
         ).join(',')
-        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only) VALUES ${values}`)
+        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only) VALUES ${values} ON CONFLICT (file_id, order_date, channel, is_count_only) DO NOTHING`)
       }
     }
 
@@ -113,7 +115,7 @@ export async function POST(req: NextRequest) {
         const values = batch.map(s =>
           `(${fileId}, '${s.item.replace(/'/g, "''")}', '${s.strain.replace(/'/g, "''")}', '${s.packSize.replace(/'/g, "''")}', ${s.sold}, ${s.subtotal}, '${s.channel}', ${s.year})`
         ).join(',')
-        await sql(`INSERT INTO sd_strains (file_id, item, strain, pack_size, sold, subtotal, channel, year) VALUES ${values}`)
+        await sql(`INSERT INTO sd_strains (file_id, item, strain, pack_size, sold, subtotal, channel, year) VALUES ${values} ON CONFLICT (file_id, item, strain, pack_size, channel, year) DO NOTHING`)
       }
     }
 
