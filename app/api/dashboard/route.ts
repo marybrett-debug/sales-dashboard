@@ -79,14 +79,16 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as SaveBody
     const region = body.region || 'usa'
 
-    // Reuse existing file record if same filename+region, otherwise create new
+    // If same file was already uploaded for this region, clear its data and re-insert
+    // (other files' data is untouched)
     let fileId: number
     const existing = await sql`
       SELECT id FROM sd_files WHERE filename = ${body.filename} AND region = ${region}
     `
     if (existing.length > 0) {
       fileId = existing[0].id as number
-      // Update metadata but keep existing data
+      await sql`DELETE FROM sd_orders WHERE file_id = ${fileId}`
+      await sql`DELETE FROM sd_strains WHERE file_id = ${fileId}`
       await sql`UPDATE sd_files SET uploaded_by = ${email}, uploaded_at = NOW() WHERE id = ${fileId}`
     } else {
       const [fileRow] = await sql`
@@ -104,7 +106,7 @@ export async function POST(req: NextRequest) {
         const values = batch.map(o =>
           `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'})`
         ).join(',')
-        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only) VALUES ${values} ON CONFLICT (file_id, order_date, channel, is_count_only) DO NOTHING`)
+        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only) VALUES ${values}`)
       }
     }
 
@@ -115,7 +117,7 @@ export async function POST(req: NextRequest) {
         const values = batch.map(s =>
           `(${fileId}, '${s.item.replace(/'/g, "''")}', '${s.strain.replace(/'/g, "''")}', '${s.packSize.replace(/'/g, "''")}', ${s.sold}, ${s.subtotal}, '${s.channel}', ${s.year})`
         ).join(',')
-        await sql(`INSERT INTO sd_strains (file_id, item, strain, pack_size, sold, subtotal, channel, year) VALUES ${values} ON CONFLICT (file_id, item, strain, pack_size, channel, year) DO NOTHING`)
+        await sql(`INSERT INTO sd_strains (file_id, item, strain, pack_size, sold, subtotal, channel, year) VALUES ${values}`)
       }
     }
 
