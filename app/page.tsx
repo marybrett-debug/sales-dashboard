@@ -674,39 +674,38 @@ function RegionDashboard({ region }: { region: Region }) {
   const fmtCurrency = REGION_CONFIG[region].currency
   const getSessionToken = () => localStorage.getItem('dashboard_session') || ''
 
-  /* ── load saved data ───────────────────────────────────── */
-  useEffect(() => {
-    const loadSaved = async () => {
-      setLoadingData(true)
-      try {
-        const res = await fetch(`/api/dashboard?region=${region}`, { headers: { Authorization: `Bearer ${getSessionToken()}` } })
-        if (!res.ok) { setLoadingData(false); return }
-        const data = await res.json()
-        if (!data.files || data.files.length === 0) { setLoadingData(false); return }
+  /* ── load saved data from server ────────────────────────── */
+  const loadFromServer = useCallback(async () => {
+    setLoadingData(true)
+    try {
+      const res = await fetch(`/api/dashboard?region=${region}`, { headers: { Authorization: `Bearer ${getSessionToken()}` } })
+      if (!res.ok) { setLoadingData(false); return }
+      const data = await res.json()
+      if (!data.files || data.files.length === 0) { setYearData(new Map()); setLoadingData(false); return }
 
-        const updated = new Map<number, YearData>()
-        const getYd = (y: number) => { if (!updated.has(y)) updated.set(y, { year: y, orders: [], strains: [], files: [] }); return updated.get(y)! }
+      const updated = new Map<number, YearData>()
+      const getYd = (y: number) => { if (!updated.has(y)) updated.set(y, { year: y, orders: [], strains: [], files: [] }); return updated.get(y)! }
 
-        for (const o of data.orders) {
-          const date = new Date(o.order_date)
-          if (isNaN(date.getTime())) continue
-          const y = date.getFullYear(), yd = getYd(y), fname = o.filename as string
-          if (!yd.files.includes(fname)) yd.files.push(fname)
-          yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale' })
-        }
+      for (const o of data.orders) {
+        const date = new Date(o.order_date)
+        if (isNaN(date.getTime())) continue
+        const y = date.getFullYear(), yd = getYd(y), fname = o.filename as string
+        if (!yd.files.includes(fname)) yd.files.push(fname)
+        yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale' })
+      }
 
-        for (const s of data.strains) {
-          const y = Number(s.year), yd = getYd(y), fname = s.filename as string
-          if (!yd.files.includes(fname)) yd.files.push(fname)
-          yd.strains.push({ item: s.item, strain: s.strain, packSize: s.pack_size, sold: Number(s.sold), subtotal: Number(s.subtotal), channel: s.channel as 'retail' | 'wholesale', year: y })
-        }
+      for (const s of data.strains) {
+        const y = Number(s.year), yd = getYd(y), fname = s.filename as string
+        if (!yd.files.includes(fname)) yd.files.push(fname)
+        yd.strains.push({ item: s.item, strain: s.strain, packSize: s.pack_size, sold: Number(s.sold), subtotal: Number(s.subtotal), channel: s.channel as 'retail' | 'wholesale', year: y })
+      }
 
-        setYearData(updated)
-      } catch (e) { console.error('Failed to load saved data:', e) }
-      finally { setLoadingData(false) }
-    }
-    loadSaved()
+      setYearData(updated)
+    } catch (e) { console.error('Failed to load saved data:', e) }
+    finally { setLoadingData(false) }
   }, [region])
+
+  useEffect(() => { loadFromServer() }, [loadFromServer])
 
   /* ── save to server ────────────────────────────────────── */
   const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]) => {
@@ -733,8 +732,6 @@ function RegionDashboard({ region }: { region: Region }) {
   /* ── file upload ───────────────────────────────────────── */
   const handleFiles = useCallback(async (files: FileList) => {
     setUploading(true)
-    const updated = new Map(yearData)
-    const getYd = (y: number) => { if (!updated.has(y)) updated.set(y, { year: y, orders: [], strains: [], files: [] }); return updated.get(y)! }
 
     for (const file of Array.from(files)) {
       if (!file.name.match(/\.(xlsx?|csv|tsv)$/i)) continue
@@ -753,7 +750,6 @@ function RegionDashboard({ region }: { region: Region }) {
 
         if (fileType === 'orders' || fileType === 'daily') {
           const dateCol = headers.find(h => h.toLowerCase() === 'date') || 'Date'
-          const yearsInFile = new Set<number>()
           let subtotalCol: string, totalCol: string, taxCol: string, salesCol: string | null
           if (fileType === 'daily') {
             subtotalCol = headers.find(h => h.toLowerCase().includes('net total')) || 'Net Total (Excl. Tax)'
@@ -769,37 +765,34 @@ function RegionDashboard({ region }: { region: Region }) {
           for (const row of rows) {
             const date = parseDate(row[dateCol])
             if (!date) continue
-            const y = date.getFullYear(); yearsInFile.add(y)
             if (fileType === 'daily') {
               const orderCount = salesCol ? toNum(row[salesCol]) : 1
               const order: OrderRow = { date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: 0, channel }
-              getYd(y).orders.push(order); fileOrders.push(order)
-              for (let i = 1; i < orderCount; i++) { const dummy: OrderRow = { date, subtotal: 0, total: 0, tax: 0, channel }; getYd(y).orders.push(dummy); fileOrders.push(dummy) }
+              fileOrders.push(order)
+              for (let i = 1; i < orderCount; i++) { fileOrders.push({ date, subtotal: 0, total: 0, tax: 0, channel }) }
             } else {
-              const order: OrderRow = { date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel }
-              getYd(y).orders.push(order); fileOrders.push(order)
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel })
             }
           }
-          for (const y of yearsInFile) { if (!getYd(y).files.includes(file.name)) getYd(y).files.push(file.name) }
         } else {
           const year = detectYearFromFilename(file.name)
-          const yd = getYd(year)
-          if (!yd.files.includes(file.name)) yd.files.push(file.name)
           const itemCol = headers.find(h => h.toLowerCase() === 'item') || 'Item'
           const soldCol = headers.find(h => h.toLowerCase() === 'sold') || 'Sold'
           const subCol = headers.find(h => h.toLowerCase() === 'subtotal') || 'Subtotal'
           for (const row of rows) {
             const item = String(row[itemCol])
             const { strain, packSize } = parseStrain(item)
-            const strainRow: StrainRow = { item, strain, packSize, sold: toNum(row[soldCol]), subtotal: toNum(row[subCol]), channel, year }
-            yd.strains.push(strainRow); fileStrains.push(strainRow)
+            fileStrains.push({ item, strain, packSize, sold: toNum(row[soldCol]), subtotal: toNum(row[subCol]), channel, year })
           }
         }
-        saveFileToServer(file.name, channel, fileType, fileOrders, fileStrains)
+        // Save to server, then server is source of truth
+        await saveFileToServer(file.name, channel, fileType, fileOrders, fileStrains)
       } catch (e) { console.error(`Error processing ${file.name}:`, e) }
     }
-    setYearData(updated); setUploading(false)
-  }, [yearData, saveFileToServer])
+    // Reload all data from server to get clean, deduplicated state
+    await loadFromServer()
+    setUploading(false)
+  }, [saveFileToServer, loadFromServer])
 
   /* ── compute ───────────────────────────────────────────── */
   const retailData = useMemo(() => computeChannelData(yearData, years, 'retail', retailGrowth), [yearData, years, retailGrowth])
