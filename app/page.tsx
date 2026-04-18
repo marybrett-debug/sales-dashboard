@@ -666,6 +666,7 @@ function DashboardWithTabs({ email, onLogout }: { email: string; onLogout: () =>
 function RegionDashboard({ region }: { region: Region }) {
   const [yearData, setYearData] = useState<Map<number, YearData>>(new Map())
   const [uploading, setUploading] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState<string>('')
   const [loadingData, setLoadingData] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('both')
   const [retailGrowth, setRetailGrowth] = useState(20)
@@ -709,9 +710,9 @@ function RegionDashboard({ region }: { region: Region }) {
   useEffect(() => { loadFromServer() }, [loadFromServer])
 
   /* ── save to server ────────────────────────────────────── */
-  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]) => {
+  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
     try {
-      await fetch('/api/dashboard', {
+      const res = await fetch('/api/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getSessionToken()}` },
         body: JSON.stringify({
@@ -720,7 +721,13 @@ function RegionDashboard({ region }: { region: Region }) {
           strains: strains.map(s => ({ item: s.item, strain: s.strain, packSize: s.packSize, sold: s.sold, subtotal: s.subtotal, channel: s.channel, year: s.year })),
         }),
       })
-    } catch (e) { console.error('Failed to save:', e) }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        console.error(`Save failed for ${filename}:`, res.status, err)
+        return false
+      }
+      return true
+    } catch (e) { console.error('Failed to save:', e); return false }
   }, [region])
 
   /* ── clear data ────────────────────────────────────────── */
@@ -733,19 +740,22 @@ function RegionDashboard({ region }: { region: Region }) {
   /* ── file upload ───────────────────────────────────────── */
   const handleFiles = useCallback(async (files: FileList) => {
     setUploading(true)
+    setUploadStatus('')
+    let successCount = 0, failCount = 0, skippedFiles: string[] = []
 
     for (const file of Array.from(files)) {
       if (!file.name.match(/\.(xlsx?|csv|tsv)$/i)) continue
       try {
+        setUploadStatus(`Processing ${file.name}...`)
         const data = new Uint8Array(await file.arrayBuffer())
         const wb = XLSX.read(data, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' })
-        if (rows.length === 0) continue
+        if (rows.length === 0) { skippedFiles.push(`${file.name} (empty)`); continue }
 
         const headers = Object.keys(rows[0])
         const fileType = detectFileType(headers)
-        if (!fileType) continue
+        if (!fileType) { skippedFiles.push(`${file.name} (unrecognized format: ${headers.join(', ')})`); continue }
         const channel = detectChannel(file.name)
         const fileOrders: OrderRow[] = [], fileStrains: StrainRow[] = []
 
@@ -818,12 +828,25 @@ function RegionDashboard({ region }: { region: Region }) {
           }
         }
         // Save to server, then server is source of truth
-        await saveFileToServer(file.name, channel, fileType === 'basic_orders' ? 'orders' : fileType, fileOrders, fileStrains)
-      } catch (e) { console.error(`Error processing ${file.name}:`, e) }
+        setUploadStatus(`Saving ${file.name} (${fileOrders.length} orders, ${fileStrains.length} strains)...`)
+        const ok = await saveFileToServer(file.name, channel, fileType === 'basic_orders' ? 'orders' : fileType, fileOrders, fileStrains)
+        if (ok) successCount++; else failCount++
+      } catch (e) {
+        console.error(`Error processing ${file.name}:`, e)
+        failCount++
+        skippedFiles.push(`${file.name} (error: ${e instanceof Error ? e.message : String(e)})`)
+      }
     }
     // Reload all data from server to get clean, deduplicated state
+    setUploadStatus('Loading data...')
     await loadFromServer()
     setUploading(false)
+    const parts = []
+    if (successCount > 0) parts.push(`${successCount} file${successCount > 1 ? 's' : ''} uploaded`)
+    if (failCount > 0) parts.push(`${failCount} failed`)
+    if (skippedFiles.length > 0) parts.push(`Skipped: ${skippedFiles.join('; ')}`)
+    setUploadStatus(parts.join('. ') || 'No files processed')
+    setTimeout(() => setUploadStatus(''), 10000)
   }, [saveFileToServer, loadFromServer])
 
   /* ── compute ───────────────────────────────────────────── */
@@ -848,14 +871,18 @@ function RegionDashboard({ region }: { region: Region }) {
         >
           <input type="file" accept=".xlsx,.xls,.csv,.tsv" multiple className="hidden" onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }} />
           {uploading ? (
-            <div className="flex items-center gap-2 text-sm text-blue-600">
-              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-              Processing…
+            <div className="flex flex-col items-center gap-1">
+              <div className="flex items-center gap-2 text-sm text-blue-600">
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                Processing…
+              </div>
+              {uploadStatus && <p className="text-xs text-gray-500">{uploadStatus}</p>}
             </div>
           ) : (
             <>
               <p className="text-sm font-medium text-gray-600">Drop files here or <span className="text-brand-600 underline">browse</span></p>
               <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv — Retail/Wholesale Orders &amp; Seeds Sales reports</p>
+              {uploadStatus && <p className={`text-xs mt-1 ${uploadStatus.includes('failed') || uploadStatus.includes('Skipped') ? 'text-red-500' : 'text-green-600'}`}>{uploadStatus}</p>}
             </>
           )}
         </label>
