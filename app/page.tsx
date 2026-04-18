@@ -710,24 +710,33 @@ function RegionDashboard({ region }: { region: Region }) {
   useEffect(() => { loadFromServer() }, [loadFromServer])
 
   /* ── save to server ────────────────────────────────────── */
+  const [lastError, setLastError] = useState('')
   const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
     try {
+      const body = JSON.stringify({
+        filename, region, channel, fileType,
+        orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: o.subtotal === 0 && o.total === 0 })),
+        strains: strains.map(s => ({ item: s.item, strain: s.strain, packSize: s.packSize, sold: s.sold, subtotal: s.subtotal, channel: s.channel, year: s.year })),
+      })
       const res = await fetch('/api/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getSessionToken()}` },
-        body: JSON.stringify({
-          filename, region, channel, fileType,
-          orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: o.subtotal === 0 && o.total === 0 })),
-          strains: strains.map(s => ({ item: s.item, strain: s.strain, packSize: s.packSize, sold: s.sold, subtotal: s.subtotal, channel: s.channel, year: s.year })),
-        }),
+        body,
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }))
-        console.error(`Save failed for ${filename}:`, res.status, err)
+        const msg = `${filename}: ${res.status} — ${err.error || JSON.stringify(err)}`
+        console.error('Save failed:', msg)
+        setLastError(msg)
         return false
       }
       return true
-    } catch (e) { console.error('Failed to save:', e); return false }
+    } catch (e) {
+      const msg = `${filename}: ${e instanceof Error ? e.message : String(e)}`
+      console.error('Failed to save:', msg)
+      setLastError(msg)
+      return false
+    }
   }, [region])
 
   /* ── clear data ────────────────────────────────────────── */
@@ -883,6 +892,7 @@ function RegionDashboard({ region }: { region: Region }) {
               <p className="text-sm font-medium text-gray-600">Drop files here or <span className="text-brand-600 underline">browse</span></p>
               <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv — Retail/Wholesale Orders &amp; Seeds Sales reports</p>
               {uploadStatus && <p className={`text-xs mt-1 ${uploadStatus.includes('failed') || uploadStatus.includes('Skipped') ? 'text-red-500' : 'text-green-600'}`}>{uploadStatus}</p>}
+              {lastError && <p className="text-xs mt-1 text-red-500 break-all">Error: {lastError}</p>}
             </>
           )}
         </label>
