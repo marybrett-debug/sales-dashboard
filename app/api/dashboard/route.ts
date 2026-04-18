@@ -39,7 +39,7 @@ async function ensureTables() {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_orders_file ON sd_orders(file_id)`
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sd_orders_dedup ON sd_orders(file_id, order_date, channel, is_count_only)`
+  await sql`DROP INDEX IF EXISTS idx_sd_orders_dedup`
 
   await sql`
     CREATE TABLE IF NOT EXISTS sd_strains (
@@ -55,7 +55,7 @@ async function ensureTables() {
     )
   `
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_strains_file ON sd_strains(file_id)`
-  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_sd_strains_dedup ON sd_strains(file_id, item, strain, pack_size, channel, year)`
+  await sql`DROP INDEX IF EXISTS idx_sd_strains_dedup`
 }
 
 /* ── POST: save uploaded data ─────────────────────────────── */
