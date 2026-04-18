@@ -98,9 +98,10 @@ function parseStrain(item: string): { strain: string; packSize: string } {
   return { strain: item, packSize: '' }
 }
 
-function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | null {
+function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | 'basic_orders' | null {
   const lower = headers.map(h => h.toLowerCase())
   if (lower.includes('order id') && lower.includes('date')) return 'orders'
+  if (lower.includes('order id') && lower.includes('subtotal') && !lower.includes('date')) return 'basic_orders'
   if (lower.includes('item') && lower.includes('sold')) return 'seeds'
   if (lower.includes('date') && lower.includes('sales') && lower.some(h => h.includes('net total') || h.includes('sub total'))) return 'daily'
   return null
@@ -774,7 +775,38 @@ function RegionDashboard({ region }: { region: Region }) {
               fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel })
             }
           }
-        } else {
+        } else if (fileType === 'basic_orders') {
+          // Orders without dates (e.g. "Retail Orders (Basic)") — spread evenly across the date range from filename
+          // Parse date range from filename like "01012026 to 17042026"
+          const rangeMatch = file.name.match(/(\d{8})\s*to\s*(\d{8})/)
+          const subtotalCol = headers.find(h => h.toLowerCase() === 'subtotal') || 'Subtotal'
+          const totalCol = headers.find(h => h.toLowerCase() === 'total') || 'Total'
+          const taxCol = headers.find(h => h.toLowerCase() === 'tax') || 'Tax'
+
+          if (rangeMatch) {
+            // Parse start/end dates from DDMMYYYY format
+            const parseRange = (s: string) => new Date(parseInt(s.slice(4)), parseInt(s.slice(2, 4)) - 1, parseInt(s.slice(0, 2)))
+            const startDate = parseRange(rangeMatch[1])
+            const endDate = parseRange(rangeMatch[2])
+
+            // Group orders by month — assign each order a date spread across the range
+            const totalOrders = rows.length
+            const msRange = endDate.getTime() - startDate.getTime()
+
+            for (let ri = 0; ri < rows.length; ri++) {
+              const row = rows[ri]
+              // Spread orders evenly across the date range
+              const date = new Date(startDate.getTime() + (msRange * ri / totalOrders))
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel })
+            }
+          } else {
+            // Fallback: assign all to Jan 1 of year from filename
+            const year = detectYearFromFilename(file.name)
+            for (const row of rows) {
+              fileOrders.push({ date: new Date(year, 0, 1), subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel })
+            }
+          }
+        } else if (fileType === 'seeds') {
           const year = detectYearFromFilename(file.name)
           const itemCol = headers.find(h => h.toLowerCase() === 'item') || 'Item'
           const soldCol = headers.find(h => h.toLowerCase() === 'sold') || 'Sold'
@@ -786,7 +818,7 @@ function RegionDashboard({ region }: { region: Region }) {
           }
         }
         // Save to server, then server is source of truth
-        await saveFileToServer(file.name, channel, fileType, fileOrders, fileStrains)
+        await saveFileToServer(file.name, channel, fileType === 'basic_orders' ? 'orders' : fileType, fileOrders, fileStrains)
       } catch (e) { console.error(`Error processing ${file.name}:`, e) }
     }
     // Reload all data from server to get clean, deduplicated state
