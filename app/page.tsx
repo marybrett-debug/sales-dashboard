@@ -10,7 +10,7 @@ import {
 
 /* ── types ───────────────────────────────────────────────── */
 
-interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale' }
+interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale'; orderCount: number }
 interface StrainRow { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: 'retail' | 'wholesale'; year: number }
 
 interface YearData {
@@ -135,7 +135,7 @@ function computeChannelData(
       if (order.channel !== channel) continue
       const mi = order.date.getMonth()
       m[mi].revenue += order.subtotal
-      m[mi].orders += 1
+      m[mi].orders += order.orderCount || 1
     }
     m.forEach(r => { r.avgOrder = r.orders > 0 ? r.revenue / r.orders : 0 })
     monthlyByYear.set(year, m)
@@ -220,7 +220,7 @@ function computeChannelData(
       if (order.channel !== channel || order.date.getMonth() !== currMonth || order.date.getFullYear() !== currMonthYear) continue
       const day = order.date.getDate()
       const entry = dailyMap.get(day)
-      if (entry) { entry.revenue += order.subtotal; entry.orders += 1 }
+      if (entry) { entry.revenue += order.subtotal; entry.orders += order.orderCount || 1 }
     }
     let cumRev = 0
     currentMonthDaily = Array.from(dailyMap.entries()).sort((a, b) => a[0] - b[0]).map(([day, d]) => {
@@ -693,7 +693,7 @@ function RegionDashboard({ region }: { region: Region }) {
         if (isNaN(date.getTime())) continue
         const y = date.getFullYear(), yd = getYd(y), fname = o.filename as string
         if (!yd.files.includes(fname)) yd.files.push(fname)
-        yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale' })
+        yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale', orderCount: Number(o.order_count) || 1 })
       }
 
       for (const s of data.strains) {
@@ -715,7 +715,7 @@ function RegionDashboard({ region }: { region: Region }) {
     try {
       const body = JSON.stringify({
         filename, region, channel, fileType,
-        orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: o.subtotal === 0 && o.total === 0 })),
+        orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: false, orderCount: o.orderCount || 1 })),
         strains: strains.map(s => ({ item: s.item, strain: s.strain, packSize: s.packSize, sold: s.sold, subtotal: s.subtotal, channel: s.channel, year: s.year })),
       })
       const res = await fetch('/api/dashboard', {
@@ -787,11 +787,9 @@ function RegionDashboard({ region }: { region: Region }) {
             if (!date) continue
             if (fileType === 'daily') {
               const orderCount = salesCol ? toNum(row[salesCol]) : 1
-              const order: OrderRow = { date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: 0, channel }
-              fileOrders.push(order)
-              for (let i = 1; i < orderCount; i++) { fileOrders.push({ date, subtotal: 0, total: 0, tax: 0, channel }) }
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: 0, channel, orderCount })
             } else {
-              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel })
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel, orderCount: 1 })
             }
           }
         } else if (fileType === 'basic_orders') {
@@ -816,13 +814,13 @@ function RegionDashboard({ region }: { region: Region }) {
               const row = rows[ri]
               // Spread orders evenly across the date range
               const date = new Date(startDate.getTime() + (msRange * ri / totalOrders))
-              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel })
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1 })
             }
           } else {
             // Fallback: assign all to Jan 1 of year from filename
             const year = detectYearFromFilename(file.name)
             for (const row of rows) {
-              fileOrders.push({ date: new Date(year, 0, 1), subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel })
+              fileOrders.push({ date: new Date(year, 0, 1), subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1 })
             }
           }
         } else if (fileType === 'seeds') {

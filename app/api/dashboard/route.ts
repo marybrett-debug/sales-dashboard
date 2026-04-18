@@ -35,9 +35,11 @@ async function ensureTables() {
       total      NUMERIC NOT NULL DEFAULT 0,
       tax        NUMERIC NOT NULL DEFAULT 0,
       channel    TEXT NOT NULL,
-      is_count_only BOOLEAN DEFAULT FALSE
+      is_count_only BOOLEAN DEFAULT FALSE,
+      order_count INTEGER NOT NULL DEFAULT 1
     )
   `
+  await sql`ALTER TABLE sd_orders ADD COLUMN IF NOT EXISTS order_count INTEGER NOT NULL DEFAULT 1`
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_orders_file ON sd_orders(file_id)`
   await sql`DROP INDEX IF EXISTS idx_sd_orders_dedup`
 
@@ -65,7 +67,7 @@ interface SaveBody {
   region: string
   channel: 'retail' | 'wholesale'
   fileType: 'orders' | 'seeds' | 'daily'
-  orders?: { date: string; subtotal: number; total: number; tax: number; channel: string; isCountOnly?: boolean }[]
+  orders?: { date: string; subtotal: number; total: number; tax: number; channel: string; isCountOnly?: boolean; orderCount?: number }[]
   strains?: { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: string; year: number }[]
 }
 
@@ -126,9 +128,9 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < body.orders.length; i += batchSize) {
         const batch = body.orders.slice(i, i + batchSize)
         const values = batch.map(o =>
-          `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'})`
+          `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'}, ${o.orderCount || 1})`
         ).join(',')
-        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only) VALUES ${values}`)
+        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only, order_count) VALUES ${values}`)
       }
     }
 
@@ -196,7 +198,7 @@ export async function GET(req: NextRequest) {
     const fileIds = files.map(f => f.id as number)
 
     const orders = await sql`
-      SELECT o.file_id, o.order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, f.filename
+      SELECT o.file_id, o.order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, o.order_count, f.filename
       FROM sd_orders o JOIN sd_files f ON f.id = o.file_id
       WHERE o.file_id = ANY(${fileIds}) ORDER BY o.order_date
     `
