@@ -10,8 +10,8 @@ import {
 
 /* ── types ───────────────────────────────────────────────── */
 
-interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale'; orderCount: number }
-interface StrainRow { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: 'retail' | 'wholesale'; year: number }
+interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale' | 'bulk'; orderCount: number; clientName?: string }
+interface StrainRow { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: 'retail' | 'wholesale' | 'bulk'; year: number }
 
 interface YearData {
   year: number
@@ -39,6 +39,7 @@ interface ChannelComputed {
   growthData: { month: string; actual: number; cumActual: number; monthlyTarget: number; cumTarget: number; gap: number; remaining: number }[]
   currentMonthDaily: DailyRow[]
   currentMonthLabel: string
+  clientMonthlyData: Map<string, number[]>
 }
 
 type ViewMode = 'charts' | 'tables' | 'both'
@@ -107,8 +108,10 @@ function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | 'basi
   return null
 }
 
-function detectChannel(fileName: string): 'retail' | 'wholesale' {
-  return fileName.toLowerCase().includes('wholesale') ? 'wholesale' : 'retail'
+function detectChannel(fileName: string): 'retail' | 'wholesale' | 'bulk' {
+  if (fileName.toLowerCase().includes('wholesale')) return 'wholesale'
+  if (fileName.toLowerCase().includes('bulk')) return 'bulk'
+  return 'retail'
 }
 
 function detectYearFromFilename(fileName: string): number {
@@ -126,7 +129,7 @@ function detectYearFromFilename(fileName: string): number {
 
 function computeChannelData(
   yearData: Map<number, YearData>, years: number[],
-  channel: 'retail' | 'wholesale', growthTarget: number,
+  channel: 'retail' | 'wholesale' | 'bulk', growthTarget: number,
 ): ChannelComputed {
   const monthlyByYear = new Map<number, MonthRow[]>()
   for (const [year, yd] of yearData) {
@@ -186,7 +189,7 @@ function computeChannelData(
       existing.sold += s.sold; existing.revenue += s.subtotal
       agg.set(s.strain, existing)
     }
-    topStrainsByYear.set(year, [...agg.entries()].map(([strain, d]) => ({ strain, ...d })).sort((a, b) => b.sold - a.sold).slice(0, 15))
+    topStrainsByYear.set(year, [...agg.entries()].map(([strain, d]) => ({ strain, ...d })).sort((a, b) => b.sold - a.sold))
   }
 
   let growthData: ChannelComputed['growthData'] = []
@@ -229,7 +232,21 @@ function computeChannelData(
     })
   }
 
-  return { monthlyByYear, yearTotals, topStrainsByYear, growthData, currentMonthDaily, currentMonthLabel }
+  // Client monthly data for wholesale/bulk
+  const clientMonthlyData = new Map<string, number[]>()
+  for (const [year, yd] of yearData) {
+    for (const order of yd.orders) {
+      if (order.channel !== channel || !order.clientName) continue
+      if (!clientMonthlyData.has(order.clientName)) {
+        clientMonthlyData.set(order.clientName, Array(12).fill(0))
+      }
+      const monthData = clientMonthlyData.get(order.clientName)!
+      const month = order.date.getMonth()
+      monthData[month] += order.subtotal
+    }
+  }
+
+  return { monthlyByYear, yearTotals, topStrainsByYear, growthData, currentMonthDaily, currentMonthLabel, clientMonthlyData }
 }
 
 /* ── pure render: channel section ────────────────────────── */
@@ -239,8 +256,9 @@ function renderChannelSection(
   years: number[], data: ChannelComputed,
   viewMode: ViewMode, growthTarget: number, setGrowthTarget: (v: number) => void,
   fmtCurrency: (n: number) => string,
+  isOpen: boolean, setIsOpen: (v: boolean) => void,
 ) {
-  const { monthlyByYear, yearTotals, topStrainsByYear, growthData, currentMonthDaily, currentMonthLabel } = data
+  const { monthlyByYear, yearTotals, topStrainsByYear, growthData, currentMonthDaily, currentMonthLabel, clientMonthlyData } = data
   const hasOrders = [...yearTotals.values()].some(t => t.orders > 0)
   const hasStrains = [...topStrainsByYear.values()].some(s => s.length > 0)
   if (!hasOrders && !hasStrains) return null
@@ -253,11 +271,20 @@ function renderChannelSection(
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 border-b-2 pb-2" style={{ borderColor: color }}>
-        <span>{emoji}</span> {title}
-      </h2>
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className="cursor-pointer flex items-center gap-2 border-b-2 pb-2" style={{ borderColor: color }}
+      >
+        <span className="text-lg transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : '' }}>▶</span>
+        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <span>{emoji}</span> {title}
+        </h2>
+      </div>
 
-      {/* Summary cards */}
+      {!isOpen && <div className="h-0" />}
+      {isOpen && (
+        <>
+          {/* Summary cards */}
       {hasOrders && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {years.map((year, i) => {
@@ -431,21 +458,115 @@ function renderChannelSection(
       {hasStrains && (
         <div className="card">
           <h3 className="font-semibold text-gray-700 mb-3 text-sm">Top Strains by Units Sold</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {years.map((year, yi) => {
-              const strains = topStrainsByYear.get(year) ?? []
-              if (strains.length === 0) return null
-              return (
-                <div key={year}>
-                  <h4 className="text-sm font-bold mb-2" style={{ color: COLORS[yi % COLORS.length] }}>{year}</h4>
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b text-gray-400 uppercase"><th className="py-1 text-left">#</th><th className="py-1 text-left">Strain</th><th className="py-1 text-right">Units</th><th className="py-1 text-right">Revenue</th></tr></thead>
-                    <tbody>{strains.map((s, i) => (<tr key={s.strain} className="border-b border-gray-50"><td className="py-1 text-gray-400">{i + 1}</td><td className="py-1 font-medium text-gray-700">{s.strain}</td><td className="py-1 text-right">{fmtNum(s.sold)}</td><td className="py-1 text-right text-gray-500">{fmtCurrency(s.revenue)}</td></tr>))}</tbody>
-                  </table>
-                </div>
-              )
-            })}
+          {years.length > 0 && (() => {
+            const latestYear = years[years.length - 1]
+            const allStrains = topStrainsByYear.get(latestYear) ?? []
+            const topStrains = allStrains.slice(0, 15)
+            return (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-gray-400 uppercase">
+                      <th className="py-2 text-left">Rank</th>
+                      <th className="py-2 text-left">Strain</th>
+                      {years.map(year => (
+                        <Fragment key={year}>
+                          <th className="py-2 text-right" style={{ color: COLORS[years.indexOf(year) % COLORS.length] }}>{year} Units</th>
+                          <th className="py-2 text-right text-gray-400">{year} Revenue</th>
+                        </Fragment>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topStrains.map((s, rank) => (
+                      <tr key={s.strain} className="border-b border-gray-50">
+                        <td className="py-2 text-gray-400">{rank + 1}</td>
+                        <td className="py-2 font-medium text-gray-700">{s.strain}</td>
+                        {years.map((year, yi) => {
+                          const yearStrains = topStrainsByYear.get(year) ?? []
+                          const yearData = yearStrains.find(st => st.strain === s.strain)
+                          return (
+                            <Fragment key={`${year}_${s.strain}`}>
+                              <td className="py-2 text-right">{yearData ? fmtNum(yearData.sold) : '—'}</td>
+                              <td className="py-2 text-right text-gray-500">{yearData ? fmtCurrency(yearData.revenue) : '—'}</td>
+                            </Fragment>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* Least Strains Sold */}
+      {hasStrains && (() => {
+        const latestYear = years[years.length - 1]
+        const allStrains = topStrainsByYear.get(latestYear) ?? []
+        const leastStrains = allStrains.sort((a, b) => a.sold - b.sold).slice(0, 15)
+        return leastStrains.length > 0 ? (
+          <div className="card">
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Least Strains Sold ({latestYear})</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b text-gray-400 uppercase">
+                    <th className="py-2 text-left">Rank</th>
+                    <th className="py-2 text-left">Strain</th>
+                    <th className="py-2 text-right">Units</th>
+                    <th className="py-2 text-right">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leastStrains.map((s, rank) => (
+                    <tr key={s.strain} className="border-b border-gray-50">
+                      <td className="py-2 text-gray-400">{rank + 1}</td>
+                      <td className="py-2 font-medium text-gray-700">{s.strain}</td>
+                      <td className="py-2 text-right">{fmtNum(s.sold)}</td>
+                      <td className="py-2 text-right text-gray-500">{fmtCurrency(s.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
+        ) : null
+      })()}
+
+      {/* Wholesale clients monthly table */}
+      {title === 'Wholesale' && clientMonthlyData.size > 0 && (
+        <div className="card overflow-x-auto">
+          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Wholesale Sales per Client</h3>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-200 text-xs uppercase text-gray-500">
+                <th className="py-2 text-left">Client Name</th>
+                {MONTHS.map(m => <th key={m} className="py-2 text-right">{m}</th>)}
+                <th className="py-2 text-right font-semibold text-gray-700">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from(clientMonthlyData.entries()).sort((a, b) => {
+                const aTotal = a[1].reduce((s, m) => s + m, 0)
+                const bTotal = b[1].reduce((s, m) => s + m, 0)
+                return bTotal - aTotal
+              }).map(([clientName, monthlyRevenue]) => {
+                const total = monthlyRevenue.reduce((s, m) => s + m, 0)
+                return (
+                  <tr key={clientName} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 font-medium text-gray-700">{clientName}</td>
+                    {monthlyRevenue.map((rev, mi) => (
+                      <td key={mi} className="py-2 text-right text-gray-800">{rev > 0 ? fmtCurrency(rev) : '—'}</td>
+                    ))}
+                    <td className="py-2 text-right font-semibold text-gray-800">{fmtCurrency(total)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -492,6 +613,8 @@ function renderChannelSection(
             </ResponsiveContainer>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )
@@ -671,6 +794,10 @@ function RegionDashboard({ region }: { region: Region }) {
   const [viewMode, setViewMode] = useState<ViewMode>('both')
   const [retailGrowth, setRetailGrowth] = useState(20)
   const [wholesaleGrowth, setWholesaleGrowth] = useState(20)
+  const [bulkGrowth, setBulkGrowth] = useState(20)
+  const [retailOpen, setRetailOpen] = useState(true)
+  const [wholesaleOpen, setWholesaleOpen] = useState(true)
+  const [bulkOpen, setBulkOpen] = useState(true)
 
   const years = useMemo(() => [...yearData.keys()].sort(), [yearData])
   const fmtCurrency = REGION_CONFIG[region].currency
@@ -693,13 +820,13 @@ function RegionDashboard({ region }: { region: Region }) {
         if (isNaN(date.getTime())) continue
         const y = date.getFullYear(), yd = getYd(y), fname = o.filename as string
         if (!yd.files.includes(fname)) yd.files.push(fname)
-        yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale', orderCount: Number(o.order_count) || 1 })
+        yd.orders.push({ date, subtotal: Number(o.subtotal), total: Number(o.total), tax: Number(o.tax), channel: o.channel as 'retail' | 'wholesale' | 'bulk', orderCount: Number(o.order_count) || 1, clientName: String(o.client_name || '') })
       }
 
       for (const s of data.strains) {
         const y = Number(s.year), yd = getYd(y), fname = s.filename as string
         if (!yd.files.includes(fname)) yd.files.push(fname)
-        yd.strains.push({ item: s.item, strain: s.strain, packSize: s.pack_size, sold: Number(s.sold), subtotal: Number(s.subtotal), channel: s.channel as 'retail' | 'wholesale', year: y })
+        yd.strains.push({ item: s.item, strain: s.strain, packSize: s.pack_size, sold: Number(s.sold), subtotal: Number(s.subtotal), channel: s.channel as 'retail' | 'wholesale' | 'bulk', year: y })
       }
 
       setYearData(updated)
@@ -711,11 +838,11 @@ function RegionDashboard({ region }: { region: Region }) {
 
   /* ── save to server ────────────────────────────────────── */
   const [lastError, setLastError] = useState('')
-  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
+  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale' | 'bulk', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
     try {
       const body = JSON.stringify({
         filename, region, channel, fileType,
-        orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: false, orderCount: o.orderCount || 1 })),
+        orders: orders.map(o => ({ date: o.date.toISOString().slice(0, 10), subtotal: o.subtotal, total: o.total, tax: o.tax, channel: o.channel, isCountOnly: false, orderCount: o.orderCount || 1, clientName: o.clientName || null })),
         strains: strains.map(s => ({ item: s.item, strain: s.strain, packSize: s.packSize, sold: s.sold, subtotal: s.subtotal, channel: s.channel, year: s.year })),
       })
       const res = await fetch('/api/dashboard', {
@@ -753,7 +880,74 @@ function RegionDashboard({ region }: { region: Region }) {
     let successCount = 0, failCount = 0, skippedFiles: string[] = []
 
     for (const file of Array.from(files)) {
-      if (!file.name.match(/\.(xlsx?|csv|tsv)$/i)) continue
+      if (!file.name.match(/\.(xlsx?|csv|tsv|pdf)$/i)) continue
+
+      // Handle PDF files separately
+      if (file.name.match(/\.pdf$/i)) {
+        try {
+          setUploadStatus(`Processing ${file.name}...`)
+          const formData = new FormData()
+          formData.append('file', file)
+          const res = await fetch('/api/parse-invoice', { method: 'POST', body: formData })
+          if (!res.ok) {
+            failCount++
+            skippedFiles.push(`${file.name} (parse error: ${res.status})`)
+            continue
+          }
+          const data = await res.json()
+          if (!data.invoice) {
+            failCount++
+            skippedFiles.push(`${file.name} (no invoice data)`)
+            continue
+          }
+          const invoice = data.invoice
+          const fileOrders: OrderRow[] = []
+          const fileStrains: StrainRow[] = []
+
+          // Create order row from invoice total
+          let invoiceDate: Date
+          if (invoice.date) {
+            const parsed = parseDate(invoice.date)
+            invoiceDate = parsed || new Date(parseInt(invoice.invoiceNumber.split('-')[0]), 0, 1)
+          } else {
+            invoiceDate = new Date(parseInt(invoice.invoiceNumber.split('-')[0]), 0, 1)
+          }
+
+          fileOrders.push({
+            date: invoiceDate,
+            subtotal: invoice.subtotal,
+            total: invoice.total,
+            tax: 0,
+            channel: 'bulk',
+            orderCount: 1,
+            clientName: invoice.customer,
+          })
+
+          // Create strain rows from invoice lines
+          for (const line of invoice.lines || []) {
+            fileStrains.push({
+              item: line.strain,
+              strain: line.strain,
+              packSize: line.packSize,
+              sold: line.quantity,
+              subtotal: line.lineTotal,
+              channel: 'bulk',
+              year: invoiceDate.getFullYear(),
+            })
+          }
+
+          // Save to server
+          setUploadStatus(`Saving ${file.name} (${fileOrders.length} orders, ${fileStrains.length} strains)...`)
+          const ok = await saveFileToServer(invoice.invoiceNumber + '.pdf', 'bulk', 'orders', fileOrders, fileStrains)
+          if (ok) successCount++; else failCount++
+        } catch (e) {
+          console.error(`Error processing ${file.name}:`, e)
+          failCount++
+          skippedFiles.push(`${file.name} (error: ${e instanceof Error ? e.message : String(e)})`)
+        }
+        continue
+      }
+
       try {
         setUploadStatus(`Processing ${file.name}...`)
         const data = new Uint8Array(await file.arrayBuffer())
@@ -770,6 +964,7 @@ function RegionDashboard({ region }: { region: Region }) {
 
         if (fileType === 'orders' || fileType === 'daily') {
           const dateCol = headers.find(h => h.toLowerCase() === 'date') || 'Date'
+          const clientCol = headers.find(h => h.toLowerCase() === 'name')
           let subtotalCol: string, totalCol: string, taxCol: string, salesCol: string | null
           if (fileType === 'daily') {
             subtotalCol = headers.find(h => h.toLowerCase().includes('net total')) || 'Net Total (Excl. Tax)'
@@ -785,11 +980,12 @@ function RegionDashboard({ region }: { region: Region }) {
           for (const row of rows) {
             const date = parseDate(row[dateCol])
             if (!date) continue
+            const clientName = clientCol ? String(row[clientCol] || '') : ''
             if (fileType === 'daily') {
               const orderCount = salesCol ? toNum(row[salesCol]) : 1
-              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: 0, channel, orderCount })
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: 0, channel, orderCount, clientName: clientName || undefined })
             } else {
-              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel, orderCount: 1 })
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: taxCol ? toNum(row[taxCol]) : 0, channel, orderCount: 1, clientName: clientName || undefined })
             }
           }
         } else if (fileType === 'basic_orders') {
@@ -799,6 +995,7 @@ function RegionDashboard({ region }: { region: Region }) {
           const subtotalCol = headers.find(h => h.toLowerCase() === 'subtotal') || 'Subtotal'
           const totalCol = headers.find(h => h.toLowerCase() === 'total') || 'Total'
           const taxCol = headers.find(h => h.toLowerCase() === 'tax') || 'Tax'
+          const clientCol = headers.find(h => h.toLowerCase() === 'name')
 
           if (rangeMatch) {
             // Parse start/end dates from DDMMYYYY format
@@ -814,13 +1011,15 @@ function RegionDashboard({ region }: { region: Region }) {
               const row = rows[ri]
               // Spread orders evenly across the date range
               const date = new Date(startDate.getTime() + (msRange * ri / totalOrders))
-              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1 })
+              const clientName = clientCol ? String(row[clientCol] || '') : ''
+              fileOrders.push({ date, subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1, clientName: clientName || undefined })
             }
           } else {
             // Fallback: assign all to Jan 1 of year from filename
             const year = detectYearFromFilename(file.name)
             for (const row of rows) {
-              fileOrders.push({ date: new Date(year, 0, 1), subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1 })
+              const clientName = clientCol ? String(row[clientCol] || '') : ''
+              fileOrders.push({ date: new Date(year, 0, 1), subtotal: toNum(row[subtotalCol]), total: toNum(row[totalCol]), tax: toNum(row[taxCol]), channel, orderCount: 1, clientName: clientName || undefined })
             }
           }
         } else if (fileType === 'seeds') {
@@ -859,6 +1058,7 @@ function RegionDashboard({ region }: { region: Region }) {
   /* ── compute ───────────────────────────────────────────── */
   const retailData = useMemo(() => computeChannelData(yearData, years, 'retail', retailGrowth), [yearData, years, retailGrowth])
   const wholesaleData = useMemo(() => computeChannelData(yearData, years, 'wholesale', wholesaleGrowth), [yearData, years, wholesaleGrowth])
+  const bulkData = useMemo(() => computeChannelData(yearData, years, 'bulk', bulkGrowth), [yearData, years, bulkGrowth])
   const hasData = years.length > 0
 
   if (loadingData) return <Spinner text={`Loading ${REGION_CONFIG[region].label} data…`} />
@@ -876,7 +1076,7 @@ function RegionDashboard({ region }: { region: Region }) {
           onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
           onDrop={e => { e.preventDefault(); e.stopPropagation(); handleFiles(e.dataTransfer.files) }}
         >
-          <input type="file" accept=".xlsx,.xls,.csv,.tsv" multiple className="hidden" onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }} />
+          <input type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf" multiple className="hidden" onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }} />
           {uploading ? (
             <div className="flex flex-col items-center gap-1">
               <div className="flex items-center gap-2 text-sm text-blue-600">
@@ -888,7 +1088,7 @@ function RegionDashboard({ region }: { region: Region }) {
           ) : (
             <>
               <p className="text-sm font-medium text-gray-600">Drop files here or <span className="text-brand-600 underline">browse</span></p>
-              <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv — Retail/Wholesale Orders &amp; Seeds Sales reports</p>
+              <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv, .pdf — Retail/Wholesale Orders, Seeds Sales, &amp; Bulk Invoices</p>
               {uploadStatus && <p className={`text-xs mt-1 ${uploadStatus.includes('failed') || uploadStatus.includes('Skipped') ? 'text-red-500' : 'text-green-600'}`}>{uploadStatus}</p>}
               {lastError && <p className="text-xs mt-1 text-red-500 break-all">Error: {lastError}</p>}
             </>
@@ -917,8 +1117,9 @@ function RegionDashboard({ region }: { region: Region }) {
             <button onClick={clearAllData} className="ml-auto text-xs text-red-500 hover:text-red-700 underline">Clear {REGION_CONFIG[region].label} data</button>
           </div>
 
-          {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency)}
-          {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency)}
+          {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency, retailOpen, setRetailOpen)}
+          {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency, wholesaleOpen, setWholesaleOpen)}
+          {renderChannelSection('Bulk Seed Sales', '🌱', '#d97706', years, bulkData, viewMode, bulkGrowth, setBulkGrowth, fmtCurrency, bulkOpen, setBulkOpen)}
         </>
       )}
 

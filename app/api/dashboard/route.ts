@@ -40,6 +40,7 @@ async function ensureTables() {
     )
   `
   await sql`ALTER TABLE sd_orders ADD COLUMN IF NOT EXISTS order_count INTEGER NOT NULL DEFAULT 1`
+  await sql`ALTER TABLE sd_orders ADD COLUMN IF NOT EXISTS client_name TEXT NOT NULL DEFAULT ''`
   await sql`CREATE INDEX IF NOT EXISTS idx_sd_orders_file ON sd_orders(file_id)`
   await sql`DROP INDEX IF EXISTS idx_sd_orders_dedup`
 
@@ -65,9 +66,9 @@ async function ensureTables() {
 interface SaveBody {
   filename: string
   region: string
-  channel: 'retail' | 'wholesale'
+  channel: 'retail' | 'wholesale' | 'bulk'
   fileType: 'orders' | 'seeds' | 'daily'
-  orders?: { date: string; subtotal: number; total: number; tax: number; channel: string; isCountOnly?: boolean; orderCount?: number }[]
+  orders?: { date: string; subtotal: number; total: number; tax: number; channel: string; isCountOnly?: boolean; orderCount?: number; clientName?: string }[]
   strains?: { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: string; year: number }[]
 }
 
@@ -128,9 +129,9 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < body.orders.length; i += batchSize) {
         const batch = body.orders.slice(i, i + batchSize)
         const values = batch.map(o =>
-          `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'}, ${o.orderCount || 1})`
+          `(${fileId}, '${o.date}', ${o.subtotal}, ${o.total}, ${o.tax}, '${o.channel}', ${o.isCountOnly ? 'TRUE' : 'FALSE'}, ${o.orderCount || 1}, '${(o.clientName || '').replace(/'/g, "''")}')`
         ).join(',')
-        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only, order_count) VALUES ${values}`)
+        await sql(`INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only, order_count, client_name) VALUES ${values}`)
       }
     }
 
@@ -198,7 +199,7 @@ export async function GET(req: NextRequest) {
     const fileIds = files.map(f => f.id as number)
 
     const orders = await sql`
-      SELECT o.file_id, o.order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, o.order_count, f.filename
+      SELECT o.file_id, o.order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, o.order_count, o.client_name, f.filename
       FROM sd_orders o JOIN sd_files f ON f.id = o.file_id
       WHERE o.file_id = ANY(${fileIds}) ORDER BY o.order_date
     `
