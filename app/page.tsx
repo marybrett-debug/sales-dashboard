@@ -260,6 +260,7 @@ function renderChannelSection(
   viewMode: ViewMode, growthTarget: number, setGrowthTarget: (v: number) => void,
   fmtCurrency: (n: number) => string,
   isOpen: boolean, setIsOpen: (v: boolean) => void,
+  strainYear: number | null, setStrainYear: (v: number | null) => void,
 ) {
   const { monthlyByYear, yearTotals, topStrainsByYear, growthData, currentMonthDaily, currentMonthLabel, clientMonthlyData } = data
   const hasOrders = [...yearTotals.values()].some(t => t.orders > 0)
@@ -458,74 +459,66 @@ function renderChannelSection(
       )}
 
       {/* Top strains */}
-      {hasStrains && (
-        <div className="card">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Top Strains by Units Sold</h3>
-          {years.length > 0 && (() => {
-            // Use the latest year that actually has strain data
-            let latestYear = years[years.length - 1]
-            let allStrains = topStrainsByYear.get(latestYear) ?? []
-            if (allStrains.length === 0) {
-              for (let i = years.length - 2; i >= 0; i--) {
-                const s = topStrainsByYear.get(years[i]) ?? []
-                if (s.length > 0) { latestYear = years[i]; allStrains = s; break }
-              }
-            }
-            const topStrains = allStrains.slice(0, 15)
-            return (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b text-gray-400 uppercase">
-                      <th className="py-2 text-left">Rank</th>
-                      <th className="py-2 text-left">Strain</th>
-                      {years.map(year => (
-                        <Fragment key={year}>
-                          <th className="py-2 text-right" style={{ color: COLORS[years.indexOf(year) % COLORS.length] }}>{year} Units</th>
-                          <th className="py-2 text-right text-gray-400">{year} Revenue</th>
-                        </Fragment>
-                      ))}
+      {hasStrains && (() => {
+        // Determine which years have strain data
+        const strainYears = years.filter(y => (topStrainsByYear.get(y) ?? []).length > 0)
+        if (strainYears.length === 0) return null
+        const selectedYear = strainYear && strainYears.includes(strainYear) ? strainYear : strainYears[strainYears.length - 1]
+        const allStrains = topStrainsByYear.get(selectedYear) ?? []
+        const topStrains = allStrains.slice(0, 15)
+        return (
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-700 text-sm">Top Strains by Units Sold</h3>
+              {strainYears.length > 1 && (
+                <select className="text-xs border rounded px-2 py-1 text-gray-600" value={selectedYear} onChange={e => setStrainYear(Number(e.target.value))}>
+                  {strainYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b text-gray-400 uppercase">
+                    <th className="py-2 text-left">Rank</th>
+                    <th className="py-2 text-left">Strain</th>
+                    <th className="py-2 text-right">Units</th>
+                    <th className="py-2 text-right">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topStrains.map((s, rank) => (
+                    <tr key={s.strain} className="border-b border-gray-50">
+                      <td className="py-2 text-gray-400">{rank + 1}</td>
+                      <td className="py-2 font-medium text-gray-700">{s.strain}</td>
+                      <td className="py-2 text-right">{fmtNum(s.sold)}</td>
+                      <td className="py-2 text-right text-gray-500">{fmtCurrency(s.revenue)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {topStrains.map((s, rank) => (
-                      <tr key={s.strain} className="border-b border-gray-50">
-                        <td className="py-2 text-gray-400">{rank + 1}</td>
-                        <td className="py-2 font-medium text-gray-700">{s.strain}</td>
-                        {years.map((year, yi) => {
-                          const yearStrains = topStrainsByYear.get(year) ?? []
-                          const yearData = yearStrains.find(st => st.strain === s.strain)
-                          return (
-                            <Fragment key={`${year}_${s.strain}`}>
-                              <td className="py-2 text-right">{yearData ? fmtNum(yearData.sold) : '—'}</td>
-                              <td className="py-2 text-right text-gray-500">{yearData ? fmtCurrency(yearData.revenue) : '—'}</td>
-                            </Fragment>
-                          )
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          })()}
-        </div>
-      )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Least Strains Sold */}
       {hasStrains && (() => {
-        let latestYear = years[years.length - 1]
-        let allStrains = topStrainsByYear.get(latestYear) ?? []
-        if (allStrains.length === 0) {
-          for (let i = years.length - 2; i >= 0; i--) {
-            const s = topStrainsByYear.get(years[i]) ?? []
-            if (s.length > 0) { latestYear = years[i]; allStrains = s; break }
-          }
-        }
+        const strainYears = years.filter(y => (topStrainsByYear.get(y) ?? []).length > 0)
+        if (strainYears.length === 0) return null
+        const selectedYear = strainYear && strainYears.includes(strainYear) ? strainYear : strainYears[strainYears.length - 1]
+        const allStrains = topStrainsByYear.get(selectedYear) ?? []
         const leastStrains = [...allStrains].sort((a, b) => a.sold - b.sold).slice(0, 15)
         return leastStrains.length > 0 ? (
           <div className="card">
-            <h3 className="font-semibold text-gray-700 mb-3 text-sm">Least Strains Sold ({latestYear})</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-700 text-sm">Least Strains Sold ({selectedYear})</h3>
+              {strainYears.length > 1 && (
+                <select className="text-xs border rounded px-2 py-1 text-gray-600" value={selectedYear} onChange={e => setStrainYear(Number(e.target.value))}>
+                  {strainYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              )}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -814,6 +807,9 @@ function RegionDashboard({ region }: { region: Region }) {
   const [retailOpen, setRetailOpen] = useState(true)
   const [wholesaleOpen, setWholesaleOpen] = useState(true)
   const [bulkOpen, setBulkOpen] = useState(true)
+  const [retailStrainYear, setRetailStrainYear] = useState<number | null>(null)
+  const [wholesaleStrainYear, setWholesaleStrainYear] = useState<number | null>(null)
+  const [bulkStrainYear, setBulkStrainYear] = useState<number | null>(null)
 
   const years = useMemo(() => [...yearData.keys()].sort(), [yearData])
   const fmtCurrency = REGION_CONFIG[region].currency
@@ -1142,9 +1138,9 @@ function RegionDashboard({ region }: { region: Region }) {
             <button onClick={clearAllData} className="ml-auto text-xs text-red-500 hover:text-red-700 underline">Clear {REGION_CONFIG[region].label} data</button>
           </div>
 
-          {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency, retailOpen, setRetailOpen)}
-          {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency, wholesaleOpen, setWholesaleOpen)}
-          {renderChannelSection('Bulk Seed Sales', '🌱', '#d97706', years, bulkData, viewMode, bulkGrowth, setBulkGrowth, fmtCurrency, bulkOpen, setBulkOpen)}
+          {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency, retailOpen, setRetailOpen, retailStrainYear, setRetailStrainYear)}
+          {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency, wholesaleOpen, setWholesaleOpen, wholesaleStrainYear, setWholesaleStrainYear)}
+          {renderChannelSection('Bulk Seed Sales', '🌱', '#d97706', years, bulkData, viewMode, bulkGrowth, setBulkGrowth, fmtCurrency, bulkOpen, setBulkOpen, bulkStrainYear, setBulkStrainYear)}
         </>
       )}
 
