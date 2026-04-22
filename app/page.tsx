@@ -160,13 +160,14 @@ function computeChannelData(
     const l4lRev = m.slice(0, lastMonthWithData + 1).reduce((s, r) => s + r.revenue, 0)
     const l4lOrd = m.slice(0, lastMonthWithData + 1).reduce((s, r) => s + r.orders, 0)
     const isPartial = year === latestYear && lastMonthWithData < 11
-    // Seasonal weights: Q1 & Q4 are peak (growing season planning), Q2 slows, Q3 builds momentum
-    // Weights represent relative share of annual revenue per month
+    // Seasonal weights based on historical cyclical pattern:
+    // Jan-Apr: strong (peak growing season planning)
+    // May-Aug: sales reduce significantly (off-season)
+    // Sep-Dec: sales pick up again (autumn/winter planning)
     const seasonalWeights = [
-      0.12, 0.11, 0.10,   // Q1 (Jan-Mar): peak — 33%
-      0.06, 0.05, 0.05,   // Q2 (Apr-Jun): slow — 16%
-      0.07, 0.08, 0.08,   // Q3 (Jul-Sep): building — 23%
-      0.09, 0.10, 0.09,   // Q4 (Oct-Dec): peak — 28%
+      0.11, 0.11, 0.10, 0.09,  // Jan-Apr: strong — 41%
+      0.05, 0.04, 0.04, 0.05,  // May-Aug: slow — 18%
+      0.08, 0.10, 0.12, 0.11,  // Sep-Dec: pickup — 41%
     ]
     const monthsWithData = lastMonthWithData + 1
     const weightOfDataMonths = seasonalWeights.slice(0, monthsWithData).reduce((a, b) => a + b, 0)
@@ -201,9 +202,11 @@ function computeChannelData(
     if (currMonthly && prevMonthly) {
       const prevTotal = prevMonthly.reduce((s, m) => s + m.revenue, 0)
       const targetTotal = prevTotal * (1 + growthTarget / 100)
-      const monthlyTarget = targetTotal / 12
+      // Distribute targets seasonally (same weights as forecast)
+      const targetWeights = [0.11, 0.11, 0.10, 0.09, 0.05, 0.04, 0.04, 0.05, 0.08, 0.10, 0.12, 0.11]
       let cumActual = 0, cumTarget = 0
       growthData = MONTHS.map((month, idx) => {
+        const monthlyTarget = targetTotal * targetWeights[idx]
         cumActual += currMonthly[idx].revenue; cumTarget += monthlyTarget
         return { month, actual: Math.round(currMonthly[idx].revenue), cumActual: Math.round(cumActual), monthlyTarget: Math.round(monthlyTarget), cumTarget: Math.round(cumTarget), gap: Math.round(cumActual - cumTarget), remaining: idx < 11 ? Math.round(Math.max(0, targetTotal - cumActual) / (11 - idx)) : 0 }
       })
