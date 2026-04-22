@@ -1084,48 +1084,59 @@ function RegionDashboard({ region }: { region: Region }) {
 
   if (loadingData) return <Spinner text={`Loading ${REGION_CONFIG[region].label} data…`} />
 
+  const uploadCard = (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-semibold text-gray-800">{REGION_CONFIG[region].emoji} Upload {REGION_CONFIG[region].label} Reports</h2>
+        {years.length > 0 && <span className="text-xs text-gray-500">{years.length} year{years.length !== 1 ? 's' : ''}: {years.join(', ')}</span>}
+      </div>
+      <label
+        className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-8 cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-colors"
+        onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); handleFiles(e.dataTransfer.files) }}
+      >
+        <input type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf" multiple className="hidden" onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }} />
+        {uploading ? (
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-2 text-sm text-blue-600">
+              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              Processing…
+            </div>
+            {uploadStatus && <p className="text-xs text-gray-500">{uploadStatus}</p>}
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-gray-600">Drop files here or <span className="text-brand-600 underline">browse</span></p>
+            <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv, .pdf — Retail/Wholesale Orders, Seeds Sales, &amp; Bulk Invoices</p>
+            {uploadStatus && <p className={`text-xs mt-1 ${uploadStatus.includes('failed') || uploadStatus.includes('Skipped') ? 'text-red-500' : 'text-green-600'}`}>{uploadStatus}</p>}
+            {lastError && <p className="text-xs mt-1 text-red-500 break-all">Error: {lastError}</p>}
+          </>
+        )}
+      </label>
+      {years.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {[...yearData.values()].sort((a, b) => a.year - b.year).map(yd => (
+            <div key={yd.year} className="text-xs text-gray-500">
+              <span className="font-semibold text-gray-700">{yd.year}:</span>{' '}
+              {yd.files.map((f, i) => <span key={i} className="inline-block bg-gray-100 rounded px-1.5 py-0.5 mr-1 mb-1">{f}</span>)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="space-y-6">
-      {/* Upload */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-gray-800">{REGION_CONFIG[region].emoji} Upload {REGION_CONFIG[region].label} Reports</h2>
-          {years.length > 0 && <span className="text-xs text-gray-500">{years.length} year{years.length !== 1 ? 's' : ''}: {years.join(', ')}</span>}
+      {/* Show upload at top when no data, at bottom when data exists */}
+      {!hasData && uploadCard}
+
+      {!hasData && (
+        <div className="card text-center py-12">
+          <p className="text-gray-400 text-sm">Upload {REGION_CONFIG[region].label} Excel or CSV reports above to get started.</p>
+          <p className="text-gray-300 text-xs mt-1">Supports Retail Orders, Retail Seeds Sales, Wholesale Orders, and Wholesale Seeds Sales.</p>
         </div>
-        <label
-          className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-8 cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-colors"
-          onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-          onDrop={e => { e.preventDefault(); e.stopPropagation(); handleFiles(e.dataTransfer.files) }}
-        >
-          <input type="file" accept=".xlsx,.xls,.csv,.tsv,.pdf" multiple className="hidden" onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = '' }} />
-          {uploading ? (
-            <div className="flex flex-col items-center gap-1">
-              <div className="flex items-center gap-2 text-sm text-blue-600">
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                Processing…
-              </div>
-              {uploadStatus && <p className="text-xs text-gray-500">{uploadStatus}</p>}
-            </div>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-gray-600">Drop files here or <span className="text-brand-600 underline">browse</span></p>
-              <p className="text-xs text-gray-400 mt-1">Supports .xlsx, .xls, .csv, .pdf — Retail/Wholesale Orders, Seeds Sales, &amp; Bulk Invoices</p>
-              {uploadStatus && <p className={`text-xs mt-1 ${uploadStatus.includes('failed') || uploadStatus.includes('Skipped') ? 'text-red-500' : 'text-green-600'}`}>{uploadStatus}</p>}
-              {lastError && <p className="text-xs mt-1 text-red-500 break-all">Error: {lastError}</p>}
-            </>
-          )}
-        </label>
-        {years.length > 0 && (
-          <div className="mt-3 space-y-1">
-            {[...yearData.values()].sort((a, b) => a.year - b.year).map(yd => (
-              <div key={yd.year} className="text-xs text-gray-500">
-                <span className="font-semibold text-gray-700">{yd.year}:</span>{' '}
-                {yd.files.map((f, i) => <span key={i} className="inline-block bg-gray-100 rounded px-1.5 py-0.5 mr-1 mb-1">{f}</span>)}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
       {hasData && (
         <>
@@ -1141,14 +1152,9 @@ function RegionDashboard({ region }: { region: Region }) {
           {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency, retailOpen, setRetailOpen, retailStrainYear, setRetailStrainYear)}
           {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency, wholesaleOpen, setWholesaleOpen, wholesaleStrainYear, setWholesaleStrainYear)}
           {renderChannelSection('Bulk Seed Sales', '🌱', '#d97706', years, bulkData, viewMode, bulkGrowth, setBulkGrowth, fmtCurrency, bulkOpen, setBulkOpen, bulkStrainYear, setBulkStrainYear)}
-        </>
-      )}
 
-      {!hasData && (
-        <div className="card text-center py-12">
-          <p className="text-gray-400 text-sm">Upload {REGION_CONFIG[region].label} Excel or CSV reports above to get started.</p>
-          <p className="text-gray-300 text-xs mt-1">Supports Retail Orders, Retail Seeds Sales, Wholesale Orders, and Wholesale Seeds Sales.</p>
-        </div>
+          {uploadCard}
+        </>
       )}
     </div>
   )
