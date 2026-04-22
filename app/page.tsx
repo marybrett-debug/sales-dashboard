@@ -459,8 +459,15 @@ function renderChannelSection(
         <div className="card">
           <h3 className="font-semibold text-gray-700 mb-3 text-sm">Top Strains by Units Sold</h3>
           {years.length > 0 && (() => {
-            const latestYear = years[years.length - 1]
-            const allStrains = topStrainsByYear.get(latestYear) ?? []
+            // Use the latest year that actually has strain data
+            let latestYear = years[years.length - 1]
+            let allStrains = topStrainsByYear.get(latestYear) ?? []
+            if (allStrains.length === 0) {
+              for (let i = years.length - 2; i >= 0; i--) {
+                const s = topStrainsByYear.get(years[i]) ?? []
+                if (s.length > 0) { latestYear = years[i]; allStrains = s; break }
+              }
+            }
             const topStrains = allStrains.slice(0, 15)
             return (
               <div className="overflow-x-auto">
@@ -504,9 +511,15 @@ function renderChannelSection(
 
       {/* Least Strains Sold */}
       {hasStrains && (() => {
-        const latestYear = years[years.length - 1]
-        const allStrains = topStrainsByYear.get(latestYear) ?? []
-        const leastStrains = allStrains.sort((a, b) => a.sold - b.sold).slice(0, 15)
+        let latestYear = years[years.length - 1]
+        let allStrains = topStrainsByYear.get(latestYear) ?? []
+        if (allStrains.length === 0) {
+          for (let i = years.length - 2; i >= 0; i--) {
+            const s = topStrainsByYear.get(years[i]) ?? []
+            if (s.length > 0) { latestYear = years[i]; allStrains = s; break }
+          }
+        }
+        const leastStrains = [...allStrains].sort((a, b) => a.sold - b.sold).slice(0, 15)
         return leastStrains.length > 0 ? (
           <div className="card">
             <h3 className="font-semibold text-gray-700 mb-3 text-sm">Least Strains Sold ({latestYear})</h3>
@@ -1023,7 +1036,16 @@ function RegionDashboard({ region }: { region: Region }) {
             }
           }
         } else if (fileType === 'seeds') {
-          const year = detectYearFromFilename(file.name)
+          // For seeds files with a date range (e.g. "01012023 to 21042026"),
+          // use the END year so strains appear under the most recent year
+          const dateMatches = file.name.match(/(\d{8})/g)
+          let year: number
+          if (dateMatches && dateMatches.length >= 2) {
+            const endYear = parseInt(dateMatches[dateMatches.length - 1].slice(4))
+            year = (endYear >= 2020 && endYear <= 2030) ? endYear : detectYearFromFilename(file.name)
+          } else {
+            year = detectYearFromFilename(file.name)
+          }
           const itemCol = headers.find(h => h.toLowerCase() === 'item') || 'Item'
           const soldCol = headers.find(h => h.toLowerCase() === 'sold') || 'Sold'
           const subCol = headers.find(h => h.toLowerCase() === 'subtotal') || 'Subtotal'
