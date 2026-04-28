@@ -10,8 +10,8 @@ import {
 
 /* ── types ───────────────────────────────────────────────── */
 
-interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale' | 'bulk'; orderCount: number; clientName?: string }
-interface StrainRow { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: 'retail' | 'wholesale' | 'bulk'; year: number }
+interface OrderRow { date: Date; subtotal: number; total: number; tax: number; channel: 'retail' | 'wholesale' | 'bulk' | 'growers'; orderCount: number; clientName?: string }
+interface StrainRow { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: 'retail' | 'wholesale' | 'bulk' | 'growers'; year: number }
 
 interface YearData {
   year: number
@@ -108,9 +108,10 @@ function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | 'basi
   return null
 }
 
-function detectChannel(fileName: string): 'retail' | 'wholesale' | 'bulk' {
+function detectChannel(fileName: string): 'retail' | 'wholesale' | 'bulk' | 'growers' {
   if (fileName.toLowerCase().includes('wholesale')) return 'wholesale'
   if (fileName.toLowerCase().includes('bulk')) return 'bulk'
+  if (fileName.toLowerCase().includes('grower')) return 'growers'
   return 'retail'
 }
 
@@ -129,7 +130,7 @@ function detectYearFromFilename(fileName: string): number {
 
 function computeChannelData(
   yearData: Map<number, YearData>, years: number[],
-  channel: 'retail' | 'wholesale' | 'bulk', growthTarget: number,
+  channel: 'retail' | 'wholesale' | 'bulk' | 'growers', growthTarget: number,
 ): ChannelComputed {
   const monthlyByYear = new Map<number, MonthRow[]>()
   for (const [year, yd] of yearData) {
@@ -804,12 +805,15 @@ function RegionDashboard({ region }: { region: Region }) {
   const [retailGrowth, setRetailGrowth] = useState(20)
   const [wholesaleGrowth, setWholesaleGrowth] = useState(20)
   const [bulkGrowth, setBulkGrowth] = useState(20)
+  const [growersGrowth, setGrowersGrowth] = useState(20)
   const [retailOpen, setRetailOpen] = useState(true)
   const [wholesaleOpen, setWholesaleOpen] = useState(true)
   const [bulkOpen, setBulkOpen] = useState(true)
+  const [growersOpen, setGrowersOpen] = useState(true)
   const [retailStrainYear, setRetailStrainYear] = useState<number | null>(null)
   const [wholesaleStrainYear, setWholesaleStrainYear] = useState<number | null>(null)
   const [bulkStrainYear, setBulkStrainYear] = useState<number | null>(null)
+  const [growersStrainYear, setGrowersStrainYear] = useState<number | null>(null)
 
   const years = useMemo(() => [...yearData.keys()].sort(), [yearData])
   const fmtCurrency = REGION_CONFIG[region].currency
@@ -850,7 +854,7 @@ function RegionDashboard({ region }: { region: Region }) {
 
   /* ── save to server ────────────────────────────────────── */
   const [lastError, setLastError] = useState('')
-  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale' | 'bulk', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
+  const saveFileToServer = useCallback(async (filename: string, channel: 'retail' | 'wholesale' | 'bulk' | 'growers', fileType: 'orders' | 'seeds' | 'daily', orders: OrderRow[], strains: StrainRow[]): Promise<boolean> => {
     try {
       const body = JSON.stringify({
         filename, region, channel, fileType,
@@ -913,6 +917,8 @@ function RegionDashboard({ region }: { region: Region }) {
             continue
           }
           const invoice = data.invoice
+          // WS-format invoices → growers channel; Sun Drops → bulk channel
+          const pdfChannel: 'bulk' | 'growers' = data.format === 'ws' ? 'growers' : 'bulk'
           const fileOrders: OrderRow[] = []
           const fileStrains: StrainRow[] = []
 
@@ -930,7 +936,7 @@ function RegionDashboard({ region }: { region: Region }) {
             subtotal: invoice.subtotal,
             total: invoice.total,
             tax: 0,
-            channel: 'bulk',
+            channel: pdfChannel,
             orderCount: 1,
             clientName: invoice.customer,
           })
@@ -943,14 +949,14 @@ function RegionDashboard({ region }: { region: Region }) {
               packSize: line.packSize,
               sold: line.quantity,
               subtotal: line.lineTotal,
-              channel: 'bulk',
+              channel: pdfChannel,
               year: invoiceDate.getFullYear(),
             })
           }
 
           // Save to server
           setUploadStatus(`Saving ${file.name} (${fileOrders.length} orders, ${fileStrains.length} strains)...`)
-          const ok = await saveFileToServer(invoice.invoiceNumber + '.pdf', 'bulk', 'orders', fileOrders, fileStrains)
+          const ok = await saveFileToServer(invoice.invoiceNumber + '.pdf', pdfChannel, 'orders', fileOrders, fileStrains)
           if (ok) successCount++; else failCount++
         } catch (e) {
           console.error(`Error processing ${file.name}:`, e)
@@ -1080,6 +1086,7 @@ function RegionDashboard({ region }: { region: Region }) {
   const retailData = useMemo(() => computeChannelData(yearData, years, 'retail', retailGrowth), [yearData, years, retailGrowth])
   const wholesaleData = useMemo(() => computeChannelData(yearData, years, 'wholesale', wholesaleGrowth), [yearData, years, wholesaleGrowth])
   const bulkData = useMemo(() => computeChannelData(yearData, years, 'bulk', bulkGrowth), [yearData, years, bulkGrowth])
+  const growersData = useMemo(() => computeChannelData(yearData, years, 'growers', growersGrowth), [yearData, years, growersGrowth])
   const hasData = years.length > 0
 
   if (loadingData) return <Spinner text={`Loading ${REGION_CONFIG[region].label} data…`} />
@@ -1152,6 +1159,7 @@ function RegionDashboard({ region }: { region: Region }) {
           {renderChannelSection('Retail', '🛒', '#16a34a', years, retailData, viewMode, retailGrowth, setRetailGrowth, fmtCurrency, retailOpen, setRetailOpen, retailStrainYear, setRetailStrainYear)}
           {renderChannelSection('Wholesale', '📦', '#2563eb', years, wholesaleData, viewMode, wholesaleGrowth, setWholesaleGrowth, fmtCurrency, wholesaleOpen, setWholesaleOpen, wholesaleStrainYear, setWholesaleStrainYear)}
           {renderChannelSection('Bulk Seed Sales', '🌱', '#d97706', years, bulkData, viewMode, bulkGrowth, setBulkGrowth, fmtCurrency, bulkOpen, setBulkOpen, bulkStrainYear, setBulkStrainYear)}
+          {renderChannelSection('Growers & Cultivators', '🌾', '#7c3aed', years, growersData, viewMode, growersGrowth, setGrowersGrowth, fmtCurrency, growersOpen, setGrowersOpen, growersStrainYear, setGrowersStrainYear)}
 
           {uploadCard}
         </>

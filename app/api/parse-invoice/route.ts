@@ -121,20 +121,25 @@ export async function POST(req: NextRequest) {
     const pdf = await pdfParse(buffer)
     const text = pdf.text
 
-    // Try both parsers
+    // Try both parsers — track which format matched
     let parsed: ParsedInvoice | null = null
+    let format: 'sundrops' | 'ws' = 'ws'
 
     if (text.includes('Invoice Number:') || text.includes('Sun Drops') || text.includes('Product Code')) {
       parsed = parseSunDropsInvoice(text)
+      if (parsed) format = 'sundrops'
     }
 
     if (!parsed && (text.includes('Invoice #') || text.includes('Cost per'))) {
       parsed = parseWSInvoice(text)
+      if (parsed) format = 'ws'
     }
 
     if (!parsed) {
       // Try both as fallback
-      parsed = parseSunDropsInvoice(text) || parseWSInvoice(text)
+      parsed = parseSunDropsInvoice(text)
+      if (parsed) { format = 'sundrops' }
+      else { parsed = parseWSInvoice(text); format = 'ws' }
     }
 
     if (!parsed || parsed.lines.length === 0) {
@@ -144,7 +149,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    return NextResponse.json({ success: true, invoice: parsed })
+    return NextResponse.json({ success: true, invoice: parsed, format })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[parse-invoice]', message)

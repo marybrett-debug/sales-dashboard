@@ -66,7 +66,7 @@ async function ensureTables() {
 interface SaveBody {
   filename: string
   region: string
-  channel: 'retail' | 'wholesale' | 'bulk'
+  channel: 'retail' | 'wholesale' | 'bulk' | 'growers'
   fileType: 'orders' | 'seeds' | 'daily'
   orders?: { date: string; subtotal: number; total: number; tax: number; channel: string; isCountOnly?: boolean; orderCount?: number; clientName?: string }[]
   strains?: { item: string; strain: string; packSize: string; sold: number; subtotal: number; channel: string; year: number }[]
