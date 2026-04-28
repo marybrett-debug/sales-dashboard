@@ -24,13 +24,15 @@ interface ParsedInvoice {
 function parseWSInvoice(text: string): ParsedInvoice | null {
   // Format: Invoice # 2026-WS-1070
   const invMatch = text.match(/Invoice\s*#?\s*([\d\w-]+)/i)
-  const custMatch = text.match(/Customer:\s*(.+?)(?:\s+Contact:|\n)/i)
+  const custMatch = text.match(/Customer:\s*(.+?)(?:Contact:|\n)/i)
 
   if (!invMatch) return null
 
   const lines: InvoiceLine[] = []
-  // Match lines like: Afghan Hash Plant - R $1.50 1,000 $1,500.00
-  const lineRegex = /^(.+?)\s+\$(\d+(?:\.\d+)?)\s+([\d,]+)\s+\$([\d,]+(?:\.\d+)?)/gm
+  // Match lines like: Afghan Hash Plant - R$1.501,000$1,500.00
+  // pdf-parse strips spaces between columns. Unit price always has exactly 2 decimal places
+  // so we use \d+\.\d{2} to avoid eating into the quantity field.
+  const lineRegex = /^(.+?)\s*\$(\d+\.\d{2})([\d,]+)\s*\$([\d,]+(?:\.\d+)?)/gm
   let m
   while ((m = lineRegex.exec(text)) !== null) {
     const strain = m[1].trim()
@@ -44,7 +46,7 @@ function parseWSInvoice(text: string): ParsedInvoice | null {
     })
   }
 
-  const totalMatch = text.match(/Total\s+\$([\d,]+(?:\.\d+)?)/i)
+  const totalMatch = text.match(/Total\s*\$\s*([\d,]+(?:\.\d+)?)/i)
   const total = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : lines.reduce((s, l) => s + l.lineTotal, 0)
 
   return {
