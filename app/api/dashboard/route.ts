@@ -109,20 +109,23 @@ export async function POST(req: NextRequest) {
       const orderChannel = body.orders[0].channel
 
       // Delete overlapping orders from OTHER files in the same region+channel+date range
-      // This prevents duplicates when re-exporting reports with different filenames
-      const otherFileIds = await sql`
-        SELECT id FROM sd_files
-        WHERE region = ${region} AND id != ${fileId} AND channel = ${body.channel}
-      `
-      if (otherFileIds.length > 0) {
-        const ids = otherFileIds.map(f => f.id as number)
-        await sql`
-          DELETE FROM sd_orders
-          WHERE file_id = ANY(${ids})
-            AND channel = ${orderChannel}
-            AND order_date >= ${minDate}::date
-            AND order_date <= ${maxDate}::date
+      // This prevents duplicates when re-exporting reports with different filenames.
+      // Skip for growers/bulk — those are individual invoices, not overlapping reports.
+      if (body.channel !== 'growers' && body.channel !== 'bulk') {
+        const otherFileIds = await sql`
+          SELECT id FROM sd_files
+          WHERE region = ${region} AND id != ${fileId} AND channel = ${body.channel}
         `
+        if (otherFileIds.length > 0) {
+          const ids = otherFileIds.map(f => f.id as number)
+          await sql`
+            DELETE FROM sd_orders
+            WHERE file_id = ANY(${ids})
+              AND channel = ${orderChannel}
+              AND order_date >= ${minDate}::date
+              AND order_date <= ${maxDate}::date
+          `
+        }
       }
 
       const batchSize = 200
@@ -137,20 +140,23 @@ export async function POST(req: NextRequest) {
 
     if (body.strains && body.strains.length > 0) {
       // Delete overlapping strains from OTHER files (same region+channel+year)
-      const years = [...new Set(body.strains.map(s => s.year))]
-      const strainChannel = body.strains[0].channel
-      const otherFileIds = await sql`
-        SELECT id FROM sd_files
-        WHERE region = ${region} AND id != ${fileId} AND channel = ${body.channel}
-      `
-      if (otherFileIds.length > 0) {
-        const ids = otherFileIds.map(f => f.id as number)
-        await sql`
-          DELETE FROM sd_strains
-          WHERE file_id = ANY(${ids})
-            AND channel = ${strainChannel}
-            AND year = ANY(${years})
+      // Skip for growers/bulk — those are individual invoices, not overlapping reports.
+      if (body.channel !== 'growers' && body.channel !== 'bulk') {
+        const years = [...new Set(body.strains.map(s => s.year))]
+        const strainChannel = body.strains[0].channel
+        const otherFileIds = await sql`
+          SELECT id FROM sd_files
+          WHERE region = ${region} AND id != ${fileId} AND channel = ${body.channel}
         `
+        if (otherFileIds.length > 0) {
+          const ids = otherFileIds.map(f => f.id as number)
+          await sql`
+            DELETE FROM sd_strains
+            WHERE file_id = ANY(${ids})
+              AND channel = ${strainChannel}
+              AND year = ANY(${years})
+          `
+        }
       }
 
       const batchSize = 200
