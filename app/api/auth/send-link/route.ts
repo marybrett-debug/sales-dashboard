@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { neon } from '@neondatabase/serverless'
-import sgMail from '@sendgrid/mail'
 import crypto from 'crypto'
 
 const ALLOWED_EMAILS = new Set([
@@ -12,9 +11,9 @@ const ALLOWED_EMAILS = new Set([
 ])
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.SENDGRID_API_KEY
+  const apiKey = process.env.POSTMARK_API_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'Email service not configured' }, { status: 500 })
+    return NextResponse.json({ error: 'POSTMARK_API_KEY not configured' }, { status: 500 })
   }
 
   try {
@@ -53,14 +52,30 @@ export async function POST(req: NextRequest) {
     const baseUrl = req.headers.get('origin') || req.headers.get('referer')?.replace(/\/[^/]*$/, '') || 'https://sales-dashboard.vercel.app'
     const magicLink = `${baseUrl}?token=${token}`
 
-    sgMail.setApiKey(apiKey)
-    await sgMail.send({
-      from: { email: 'mary.brett@gmail.com', name: "Barney's Farm Dashboard" },
-      to: normalised,
-      subject: 'Your Dashboard Login Link',
-      text: `Hi,\n\nClick here to access the Barney's Farm Sales Dashboard:\n\n${magicLink}\n\nThis link expires in 15 minutes.\n\n— Barney's Farm`,
-      html: `<p>Hi,</p><p>Click below to access the Barney's Farm Sales Dashboard:</p><p><a href="${magicLink}" style="display:inline-block;background:#16a34a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Open Dashboard</a></p><p style="color:#666;font-size:13px;">Expires in 15 minutes, single use.</p><p style="color:#999;font-size:11px;">${magicLink}</p>`,
+    const pmRes = await fetch('https://api.postmarkapp.com/email', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-Postmark-Server-Token': apiKey,
+      },
+      body: JSON.stringify({
+        From: 'customerservice@barneysfarm.us',
+        To: normalised,
+        Subject: 'Your Dashboard Login Link',
+        TextBody: `Hi,\n\nClick here to access the Barney's Farm Sales Dashboard:\n\n${magicLink}\n\nThis link expires in 15 minutes.\n\n— Barney's Farm`,
+        HtmlBody: `<p>Hi,</p><p>Click below to access the Barney's Farm Sales Dashboard:</p><p><a href="${magicLink}" style="display:inline-block;background:#16a34a;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Open Dashboard</a></p><p style="color:#666;font-size:13px;">Expires in 15 minutes, single use.</p><p style="color:#999;font-size:11px;">${magicLink}</p>`,
+        MessageStream: 'outbound',
+      }),
     })
+
+    const pmData = await pmRes.json()
+
+    if (!pmRes.ok || pmData.ErrorCode) {
+      const errMsg = pmData.Message || `Postmark error ${pmData.ErrorCode}`
+      console.error('[auth/send-link]', errMsg, pmData)
+      return NextResponse.json({ error: errMsg }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, message: 'If that email is authorised, a login link has been sent.' })
   } catch (err) {
