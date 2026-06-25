@@ -751,7 +751,68 @@ function AuthGate() {
 
   if (authState === 'loading') return <Spinner text="Checking access…" />
   if (authState === 'logged-out') return <LoginGate />
-  return <DashboardWithTabs email={authEmail} onLogout={handleLogout} />
+  return <Home email={authEmail} onLogout={handleLogout} />
+}
+
+/* ── home landing page: two big buttons ──────────────────── */
+
+const COMPETITOR_URL = 'https://barneys-competitor-monitor-9q5k.vercel.app'
+
+function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
+  const [view, setView] = useState<'home' | 'sales'>('home')
+
+  if (view === 'sales') {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setView('home')}
+          className="text-sm text-gray-500 hover:text-brand-600 underline"
+        >
+          ← Back to dashboards
+        </button>
+        <DashboardWithTabs email={email} onLogout={onLogout} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Barney&apos;s Farm Dashboards</h1>
+          <p className="text-sm text-gray-500 mt-1">Choose a dashboard to view</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-400">{email}</span>
+          <button onClick={onLogout} className="text-xs text-gray-500 hover:text-red-600 underline">Logout</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <button
+          onClick={() => setView('sales')}
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all"
+        >
+          <div className="text-4xl mb-3">📊</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Sales Data</div>
+          <p className="text-sm text-gray-500 mt-1">Revenue, forecasting, strains and channels by region (USA &amp; Europe).</p>
+        </button>
+
+        <a
+          href={COMPETITOR_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all block"
+        >
+          <div className="text-4xl mb-3">🔍</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Competitor Dashboard ↗</div>
+          <p className="text-sm text-gray-500 mt-1">Promo performance, competitor offers by week, head-to-head pricing and special offers.</p>
+        </a>
+      </div>
+
+      <p className="text-xs text-gray-400 text-center mt-8">Both dashboards are restricted to authorised Barney&apos;s Farm emails.</p>
+    </div>
+  )
 }
 
 /* ── dashboard with region tabs ──────────────────────────── */
