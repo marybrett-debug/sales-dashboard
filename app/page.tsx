@@ -757,6 +757,7 @@ function AuthGate() {
 /* ── home landing page: two big buttons ──────────────────── */
 
 const COMPETITOR_URL = 'https://barneys-competitor-monitor-9q5k.vercel.app'
+const SHIPDASH_URL = 'https://web-production-bb7a.up.railway.app'
 
 function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [view, setView] = useState<'home' | 'sales'>('home')
@@ -807,6 +808,17 @@ function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
           <div className="text-4xl mb-3">🔍</div>
           <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Competitor Dashboard ↗</div>
           <p className="text-sm text-gray-500 mt-1">Promo performance, competitor offers by week, head-to-head pricing and special offers.</p>
+        </a>
+
+        <a
+          href={SHIPDASH_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all block"
+        >
+          <div className="text-4xl mb-3">📦</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Ship Dash ↗</div>
+          <p className="text-sm text-gray-500 mt-1">Shipping and fulfilment tracking.</p>
         </a>
       </div>
 
