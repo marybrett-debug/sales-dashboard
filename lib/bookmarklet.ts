@@ -3,7 +3,8 @@ import { ORDER_COLUMNS } from '@/lib/admin'
 /*
  * "BF Sales Sync" bookmarklet: runs on an admin.barneysfarm.us page the user is already signed in to
  * (so Cloudflare Access and the admin login are already done), reads Sales → Orders newest first
- * back to a chosen date, and posts the rows to /api/admin-sync/push in parts of whole days, showing
+ * back to a chosen date, and posts the rows to /api/admin-sync/push in parts of whole days, then downloads each year's
+ * retail and wholesale products report and posts it to /api/admin-sync/strains, showing
  * progress in a box on the page. If the admin page won't let it talk to the dashboard in the
  * background, it sends the data by opening the dashboard in that tab.
  */
@@ -34,6 +35,27 @@ parts.push({since,until,rows:cur});const saved=[];
 try{for(let p=0;p<parts.length;p++){const k=parts[p];const span=k.since+(k.until?' to '+k.until:' onwards');say('saving part '+(p+1)+' of '+parts.length+' ('+span+')…');
 const res=await fetch(APP+'/api/admin-sync/push',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({key:KEY,since:k.since,until:k.until,keys,rows:k.rows})});const out=await res.json();
 if(!out.ok){done('Sales sync failed for '+span+': '+out.error+(saved.length?'\\nAlready saved: '+saved.join('; '):''));return;}saved.push(out.message);}
+const b64=buf=>{const u=new Uint8Array(buf);let s='';for(let i=0;i<u.length;i+=32768)s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(s);};
+const csrf=(document.querySelector('meta[name=csrf-token]')||{}).content||'';
+async function grab(rep,y){const from=y+'-01-01 00:00:00',to=y+'-12-31 23:59:59';
+const page='/admin/reporting/reports?report='+rep+'&products=all&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to);
+const fix=u=>{let x;try{x=new URL(u,location.origin+page);}catch(e){return null;}if(x.origin!==location.origin)return null;x.searchParams.set('from',from);x.searchParams.set('to',to);if(!x.searchParams.has('report'))x.searchParams.set('report',rep);if(!x.searchParams.has('products'))x.searchParams.set('products','all');return x.toString();};
+const html=await(await fetch(page,{credentials:'include'})).text();const doc=new DOMParser().parseFromString(html,'text/html');
+const RX=/export|download|xlsx|excel/i,tries=[],seen=new Set();const add=t=>{if(!t.u||seen.has(t.u+(t.post?'#p':'')))return;seen.add(t.u+(t.post?'#p':''));tries.push(t);};
+doc.querySelectorAll('form').forEach(f=>{if(RX.test(f.textContent+' '+(f.getAttribute('action')||''))){const d=new URLSearchParams();for(const el of f.querySelectorAll('input[name],select[name]'))d.set(el.name,el.value);d.set('from',from);d.set('to',to);add({u:fix(f.getAttribute('action')||page),post:/post/i.test(f.getAttribute('method')||''),d});}});
+doc.querySelectorAll('a[href]').forEach(a=>{if(RX.test(a.textContent+' '+a.getAttribute('href')))add({u:fix(a.getAttribute('href'))});});
+const flat=html.split('\\\\/').join('/');const re=/["']([^"'\\s<>]*(?:export|download)[^"'\\s<>]*)["']/gi;let m;while((m=re.exec(flat))){if(/^(\\/|https?:)/.test(m[1])&&!/\\.(js|css|png|svg)(\\?|$)/i.test(m[1]))add({u:fix(m[1])});}
+for(const g of['&export=1','&export=xlsx','&format=xlsx','&download=1'])add({u:fix(page+g)});
+add({u:fix('/admin/reporting/reports/export?report='+rep)});
+const notes=[];for(const t of tries){if(!t.u)continue;try{let r=await fetch(t.u,t.post?{method:'POST',credentials:'include',headers:{'X-CSRF-TOKEN':csrf},body:t.d}:{credentials:'include'});
+let buf=await r.arrayBuffer(),u8=new Uint8Array(buf);
+if(!(u8[0]===80&&u8[1]===75)&&/json/.test(r.headers.get('content-type')||'')){try{const j=JSON.parse(new TextDecoder().decode(u8));const link=j.url||j.file||j.download_url||(j.data&&(j.data.url||j.data.file));if(link){r=await fetch(link,{credentials:'include'});buf=await r.arrayBuffer();u8=new Uint8Array(buf);}}catch(e){}}
+if(u8.length>100&&u8[0]===80&&u8[1]===75)return buf;notes.push(t.u.replace(location.origin,'')+' ('+r.status+')');}catch(e){notes.push(t.u.replace(location.origin,'')+' ('+e+')');}}
+throw new Error('could not find the Excel export. Tried: '+notes.slice(0,8).join(' ; '));}
+const sy=Number(since.slice(0,4)),ny=new Date().getFullYear();
+for(let y=sy;y<=ny;y++)for(const[rep,ch]of[['retail_products','retail'],['wholesale_products','wholesale']]){say('reading '+ch+' strain sales for '+y+'…');
+try{const buf=await grab(rep,y);say('saving '+ch+' strain sales for '+y+'…');const res=await fetch(APP+'/api/admin-sync/strains',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({key:KEY,channel:ch,year:y,xlsx:b64(buf)})});const out=await res.json();
+saved.push(out.ok?out.message:'Strains '+ch+' '+y+' not saved: '+out.error);}catch(e){saved.push('Strains '+ch+' '+y+' not saved: '+(e.message||e));}}
 done('Sales dashboard synced.\\n'+saved.join('\\n'));return;}
 catch(e){if(saved.length){done('Sales sync stopped partway: '+e+'\\nAlready saved: '+saved.join('; '));return;}}
 box.remove();const payload=JSON.stringify({key:KEY,since,keys,rows});
