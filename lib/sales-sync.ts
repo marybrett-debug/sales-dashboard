@@ -129,3 +129,45 @@ export async function logFailure(by: string, since: string | null, until: string
   const sql = neon(process.env.DATABASE_URL!)
   await sql`INSERT INTO sd_admin_sync_runs (ran_by, ok, date_from, date_to, message) VALUES (${by}, FALSE, ${since}, ${until}, ${message})`
 }
+
+/* Same split as the upload parser: "Gorilla Zkittlez - 3 seeds pack" → strain + pack size */
+function parseStrain(item: string) {
+  const m = item.match(/^(.+?)\s*[-–—]\s*(\d+)\s*[Ss]eeds?/)
+  return m ? { strain: m[1].trim(), packSize: m[2] } : { strain: item, packSize: '' }
+}
+
+/* Replace one channel's strain sales for a year with the admin's products report (Item, Sold, Subtotal). */
+export async function saveStrains(rows: { item: string; sold: number; subtotal: number }[], channel: Channel, year: number, by: string) {
+  const sql = neon(process.env.DATABASE_URL!)
+  const filename = `Admin sync strains ${channel} ${year}`
+  const [file] = await sql`
+    INSERT INTO sd_files (filename, region, channel, file_type, uploaded_by)
+    VALUES (${filename}, ${REGION}, ${channel}, 'seeds', ${by})
+    ON CONFLICT (region, filename) DO UPDATE SET uploaded_by = EXCLUDED.uploaded_by, uploaded_at = NOW()
+    RETURNING id
+  `
+  // Uploaded strain reports for the same channel and year are replaced, as a new upload would be
+  await sql`
+    DELETE FROM sd_strains s USING sd_files f
+    WHERE s.file_id = f.id AND f.region = ${REGION} AND s.channel = ${channel} AND s.year = ${year}
+  `
+  if (rows.length > 0) {
+    const json = JSON.stringify(rows.map(r => ({ i: r.item, ...(p => ({ s: p.strain, p: p.packSize }))(parseStrain(r.item)), q: r.sold, t: r.subtotal })))
+    await sql`
+      INSERT INTO sd_strains (file_id, item, strain, pack_size, sold, subtotal, channel, year)
+      SELECT ${file.id}, x.i, x.s, x.p, x.q, x.t, ${channel}, ${year}
+      FROM jsonb_to_recordset(${json}::jsonb) AS x(i text, s text, p text, q numeric, t numeric)
+    `
+  }
+  await sql`
+    DELETE FROM sd_files WHERE region = ${REGION}
+      AND NOT EXISTS (SELECT 1 FROM sd_orders WHERE file_id = sd_files.id)
+      AND NOT EXISTS (SELECT 1 FROM sd_strains WHERE file_id = sd_files.id)
+  `
+  const message = `${rows.length.toLocaleString('en-US')} ${channel} strain lines for ${year}`
+  await sql`
+    INSERT INTO sd_admin_sync_runs (ran_by, ok, complete, date_from, date_to, orders, message)
+    VALUES (${by}, TRUE, FALSE, ${`${year}-01-01`}, ${`${year}-12-31`}, 0, ${message})
+  `
+  return { lines: rows.length, message }
+}

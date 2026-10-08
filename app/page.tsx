@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback, Fragment, Suspense } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import * as XLSX from 'xlsx'
 import {
@@ -108,6 +108,15 @@ function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | 'basi
   if (lower.includes('item') && lower.includes('sold')) return 'seeds'
   if (lower.includes('date') && lower.includes('sales') && lower.some(h => h.includes('net total') || h.includes('sub total'))) return 'daily'
   return null
+}
+
+/* Client names that differ only in case, punctuation or a company suffix are the same client */
+const CLIENT_ALIASES: [RegExp, string][] = [[/^north atlantic\b/, 'north atlantic']]
+function clientKey(name: string): string {
+  let k = name.toLowerCase().replace(/&amp;|&/g, ' and ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  k = k.replace(/(\s(inc|llc|ltd|limited|co|company|corp|corporation))+$/, '').trim()
+  for (const [re, alias] of CLIENT_ALIASES) if (re.test(k)) return alias
+  return k
 }
 
 function detectChannel(fileName: string): 'retail' | 'wholesale' | 'bulk' | 'growers' {
@@ -238,17 +247,23 @@ function computeChannelData(
     })
   }
 
-  // Client monthly data for wholesale/bulk
+  // Client monthly data for wholesale/bulk, latest year only. Spellings of the same client
+  // ("North Atlantic Seed Co" / "North Atlantic Seed Company, LLC") are merged under the most used one.
   const clientMonthlyData = new Map<string, number[]>()
-  for (const [year, yd] of yearData) {
-    for (const order of yd.orders) {
+  const clientYd = latestYear ? yearData.get(latestYear) : null
+  if (clientYd) {
+    const byKey = new Map<string, { months: number[]; names: Map<string, number> }>()
+    for (const order of clientYd.orders) {
       if (order.channel !== channel || !order.clientName) continue
-      if (!clientMonthlyData.has(order.clientName)) {
-        clientMonthlyData.set(order.clientName, Array(12).fill(0))
-      }
-      const monthData = clientMonthlyData.get(order.clientName)!
-      const month = order.date.getMonth()
-      monthData[month] += order.subtotal
+      const key = clientKey(order.clientName)
+      if (!byKey.has(key)) byKey.set(key, { months: Array(12).fill(0), names: new Map() })
+      const c = byKey.get(key)!
+      c.months[order.date.getMonth()] += order.subtotal
+      c.names.set(order.clientName, (c.names.get(order.clientName) || 0) + 1)
+    }
+    for (const c of byKey.values()) {
+      const name = [...c.names.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      clientMonthlyData.set(name, c.months)
     }
   }
 
@@ -324,7 +339,7 @@ function renderChannelSection(
       {/* Current month daily */}
       {hasOrders && currentMonthDaily.length > 0 && currentMonthDaily.some(d => d.revenue > 0) && (viewMode === 'charts' || viewMode === 'both') && (
         <div className="card">
-          <h3 className="font-semibold text-gray-700 mb-1 text-sm">Daily Sales — {currentMonthLabel}</h3>
+          <CardTitle className="font-semibold text-gray-700 mb-1 text-sm">Daily Sales — {currentMonthLabel}</CardTitle>
           <p className="text-xs text-gray-400 mb-3">Revenue by day this month</p>
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -359,7 +374,7 @@ function renderChannelSection(
       {/* Revenue chart */}
       {hasOrders && (viewMode === 'charts' || viewMode === 'both') && (
         <div className="card">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Monthly Revenue</h3>
+          <CardTitle className="font-semibold text-gray-700 mb-3 text-sm">Monthly Revenue</CardTitle>
           <div style={{ width: '100%', height: 280 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
@@ -380,7 +395,7 @@ function renderChannelSection(
       {/* Monthly table */}
       {hasOrders && (viewMode === 'tables' || viewMode === 'both') && (
         <div className="card overflow-x-auto">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Monthly Breakdown</h3>
+          <CardTitle className="font-semibold text-gray-700 mb-3 text-sm">Monthly Breakdown</CardTitle>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-xs uppercase text-gray-500">
@@ -472,7 +487,7 @@ function renderChannelSection(
         return (
           <div className="card">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-700 text-sm">Top Strains by Units Sold</h3>
+              <CardTitle className="font-semibold text-gray-700 text-sm">Top Strains by Units Sold</CardTitle>
               {strainYears.length > 1 && (
                 <select className="text-xs border rounded px-2 py-1 text-gray-600" value={selectedYear} onChange={e => setStrainYear(Number(e.target.value))}>
                   {strainYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -515,7 +530,7 @@ function renderChannelSection(
         return leastStrains.length > 0 ? (
           <div className="card">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-700 text-sm">Least Strains Sold ({selectedYear})</h3>
+              <CardTitle className="font-semibold text-gray-700 text-sm">Least Strains Sold ({selectedYear})</CardTitle>
               {strainYears.length > 1 && (
                 <select className="text-xs border rounded px-2 py-1 text-gray-600" value={selectedYear} onChange={e => setStrainYear(Number(e.target.value))}>
                   {strainYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -551,7 +566,7 @@ function renderChannelSection(
       {/* Wholesale clients monthly table */}
       {title === 'Wholesale' && clientMonthlyData.size > 0 && (
         <div className="card overflow-x-auto">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Wholesale Sales per Client</h3>
+          <CardTitle className="font-semibold text-gray-700 mb-3 text-sm">Wholesale Sales per Client{years.length > 0 ? ` (${years[years.length - 1]})` : ''}</CardTitle>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-200 text-xs uppercase text-gray-500">
@@ -586,7 +601,7 @@ function renderChannelSection(
       {hasOrders && years.length >= 2 && growthData.length > 0 && (
         <div className="card">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-            <h3 className="font-semibold text-gray-700 text-sm">Growth Trajectory</h3>
+            <CardTitle className="font-semibold text-gray-700 text-sm">Growth Trajectory</CardTitle>
             <div className="flex items-center gap-2 text-sm">
               <label className="text-gray-500">Target:</label>
               <input type="number" value={growthTarget} onChange={e => setGrowthTarget(Math.max(0, parseInt(e.target.value) || 0))} className="w-16 rounded border border-gray-300 px-2 py-1 text-center text-sm" />
@@ -686,6 +701,26 @@ function LoginGate() {
 }
 
 /* ── spinner ─────────────────────────────────────────────── */
+
+/* Box heading with a collapse arrow: hides the rest of its .card when clicked */
+function CardTitle({ className, children }: { className: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true)
+  const ref = useRef<HTMLHeadingElement>(null)
+  const toggle = () => {
+    const card = ref.current?.closest('.card')
+    if (!card) return
+    for (const el of Array.from(card.children) as HTMLElement[]) {
+      if (!el.contains(ref.current)) el.style.display = open ? 'none' : ''
+    }
+    setOpen(!open)
+  }
+  return (
+    <h3 ref={ref} onClick={toggle} className={`${className} cursor-pointer select-none flex items-center gap-1.5`}>
+      <span className="text-xs text-gray-400 transition-transform" style={{ transform: open ? 'rotate(90deg)' : '' }}>▶</span>
+      {children}
+    </h3>
+  )
+}
 
 function Spinner({ text }: { text: string }) {
   return (
@@ -1217,7 +1252,7 @@ function RegionDashboard({ region }: { region: Region }) {
   const uploadCard = (
     <div className="card">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold text-gray-800">{REGION_CONFIG[region].emoji} Upload {REGION_CONFIG[region].label} Reports</h2>
+        <CardTitle className="font-semibold text-gray-800">{REGION_CONFIG[region].emoji} Upload {REGION_CONFIG[region].label} Reports</CardTitle>
         {years.length > 0 && <span className="text-xs text-gray-500">{years.length} year{years.length !== 1 ? 's' : ''}: {years.join(', ')}</span>}
       </div>
       {region === 'usa' && <AdminSync onSynced={loadFromServer} />}
