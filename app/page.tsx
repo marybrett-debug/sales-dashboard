@@ -110,6 +110,15 @@ function detectFileType(headers: string[]): 'orders' | 'seeds' | 'daily' | 'basi
   return null
 }
 
+/* Client names that differ only in case, punctuation or a company suffix are the same client */
+const CLIENT_ALIASES: [RegExp, string][] = [[/^north atlantic\b/, 'north atlantic']]
+function clientKey(name: string): string {
+  let k = name.toLowerCase().replace(/&amp;|&/g, ' and ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  k = k.replace(/(\s(inc|llc|ltd|limited|co|company|corp|corporation))+$/, '').trim()
+  for (const [re, alias] of CLIENT_ALIASES) if (re.test(k)) return alias
+  return k
+}
+
 function detectChannel(fileName: string): 'retail' | 'wholesale' | 'bulk' | 'growers' {
   if (fileName.toLowerCase().includes('wholesale')) return 'wholesale'
   if (fileName.toLowerCase().includes('bulk')) return 'bulk'
@@ -238,17 +247,23 @@ function computeChannelData(
     })
   }
 
-  // Client monthly data for wholesale/bulk
+  // Client monthly data for wholesale/bulk, latest year only. Spellings of the same client
+  // ("North Atlantic Seed Co" / "North Atlantic Seed Company, LLC") are merged under the most used one.
   const clientMonthlyData = new Map<string, number[]>()
-  for (const [year, yd] of yearData) {
-    for (const order of yd.orders) {
+  const clientYd = latestYear ? yearData.get(latestYear) : null
+  if (clientYd) {
+    const byKey = new Map<string, { months: number[]; names: Map<string, number> }>()
+    for (const order of clientYd.orders) {
       if (order.channel !== channel || !order.clientName) continue
-      if (!clientMonthlyData.has(order.clientName)) {
-        clientMonthlyData.set(order.clientName, Array(12).fill(0))
-      }
-      const monthData = clientMonthlyData.get(order.clientName)!
-      const month = order.date.getMonth()
-      monthData[month] += order.subtotal
+      const key = clientKey(order.clientName)
+      if (!byKey.has(key)) byKey.set(key, { months: Array(12).fill(0), names: new Map() })
+      const c = byKey.get(key)!
+      c.months[order.date.getMonth()] += order.subtotal
+      c.names.set(order.clientName, (c.names.get(order.clientName) || 0) + 1)
+    }
+    for (const c of byKey.values()) {
+      const name = [...c.names.entries()].sort((a, b) => b[1] - a[1])[0][0]
+      clientMonthlyData.set(name, c.months)
     }
   }
 
@@ -551,7 +566,7 @@ function renderChannelSection(
       {/* Wholesale clients monthly table */}
       {title === 'Wholesale' && clientMonthlyData.size > 0 && (
         <div className="card overflow-x-auto">
-          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Wholesale Sales per Client</h3>
+          <h3 className="font-semibold text-gray-700 mb-3 text-sm">Wholesale Sales per Client{years.length > 0 ? ` (${years[years.length - 1]})` : ''}</h3>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-200 text-xs uppercase text-gray-500">
