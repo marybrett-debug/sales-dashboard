@@ -8,6 +8,7 @@ import {
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import CogsDashboard from './cogs'
+import MarketingDashboard from './marketing'
 
 /* ── types ───────────────────────────────────────────────── */
 
@@ -761,7 +762,7 @@ const COMPETITOR_URL = 'https://barneys-competitor-monitor-9q5k.vercel.app'
 const SHIPDASH_URL = 'https://web-production-bb7a.up.railway.app'
 
 function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
-  const [view, setView] = useState<'home' | 'sales' | 'cogs'>('home')
+  const [view, setView] = useState<'home' | 'sales' | 'cogs' | 'marketing'>('home')
 
   if (view === 'cogs') {
     return (
@@ -773,6 +774,20 @@ function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
           ← Back to dashboards
         </button>
         <CogsDashboard token={localStorage.getItem('dashboard_session') || ''} />
+      </div>
+    )
+  }
+
+  if (view === 'marketing') {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setView('home')}
+          className="text-sm text-gray-500 hover:text-brand-600 underline"
+        >
+          ← Back to dashboards
+        </button>
+        <MarketingDashboard token={localStorage.getItem('dashboard_session') || ''} />
       </div>
     )
   }
@@ -821,6 +836,15 @@ function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
           <div className="text-4xl mb-3">🧮</div>
           <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">COGS</div>
           <p className="text-sm text-gray-500 mt-1">Cost per pack and margin by pack size, with postage from Ship Dash.</p>
+        </button>
+
+        <button
+          onClick={() => setView('marketing')}
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all"
+        >
+          <div className="text-4xl mb-3">📣</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Marketing</div>
+          <p className="text-sm text-gray-500 mt-1">12-month promo calendar (USA &amp; Europe), promo approvals, ad partners and LinkedIn.</p>
         </button>
 
         <a
