@@ -759,6 +759,7 @@ function AuthGate() {
 
 const COMPETITOR_URL = 'https://barneys-competitor-monitor-9q5k.vercel.app'
 const SHIPDASH_URL = 'https://web-production-bb7a.up.railway.app'
+const MARKETING_URL = 'https://barneys-marketing-dashboard.vercel.app'
 
 function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [view, setView] = useState<'home' | 'sales' | 'cogs'>('home')
@@ -822,6 +823,17 @@ function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
           <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">COGS</div>
           <p className="text-sm text-gray-500 mt-1">Cost per pack and margin by pack size, with postage from Ship Dash.</p>
         </button>
+
+        <a
+          href={MARKETING_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all block"
+        >
+          <div className="text-4xl mb-3">📣</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Marketing Dashboard ↗</div>
+          <p className="text-sm text-gray-500 mt-1">Promo calendar (USA &amp; Europe), promo approvals, ad partners, email, social and performance.</p>
+        </a>
 
         <a
           href={COMPETITOR_URL}
