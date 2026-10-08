@@ -18,6 +18,7 @@ export interface AdminOrder { ref: string; date: string; subtotal: number; total
 
 const REQUIRED_ENV = ['CF_ACCESS_CLIENT_ID', 'CF_ACCESS_CLIENT_SECRET', 'ADMIN_EMAIL', 'ADMIN_PASSWORD'] as const
 const SKIP_STATUSES = /cancel|closed|fraud|refund/i
+export const isLiveOrder = (o: AdminOrder) => !SKIP_STATUSES.test(o.status)
 
 export function missingAdminEnv(): string[] {
   return REQUIRED_ENV.filter(k => !process.env[k])
@@ -108,20 +109,31 @@ function pick(rec: Record<string, unknown>, keys: string[]) {
   return undefined
 }
 
+// Grid columns each order field can come from, in order of preference
+export const ORDER_COLUMNS = {
+  created_at: ['created_at', 'order_date', 'date'],
+  base_sub_total: ['base_sub_total', 'sub_total', 'base_subtotal', 'subtotal'],
+  base_grand_total: ['base_grand_total', 'grand_total'],
+  status: ['status', 'status_label'],
+  full_name: ['full_name', 'customer_name', 'billed_to'],
+  channel_name: ['channel_name', 'channel'],
+  increment_id: ['increment_id', 'id'],
+}
+
 export function parseOrder(rec: Record<string, unknown>): AdminOrder | null {
-  const date = isoDate(pick(rec, ['created_at', 'order_date', 'date']))
-  const total = money(pick(rec, ['base_grand_total', 'grand_total']))
-  const subtotal = money(pick(rec, ['base_sub_total', 'sub_total', 'base_subtotal', 'subtotal'])) ?? total
+  const date = isoDate(pick(rec, ORDER_COLUMNS.created_at))
+  const total = money(pick(rec, ORDER_COLUMNS.base_grand_total))
+  const subtotal = money(pick(rec, ORDER_COLUMNS.base_sub_total)) ?? total
   if (!date || total === null || subtotal === null) return null
-  const ref = stripHtml(pick(rec, ['increment_id', 'id']))
-  const channelName = stripHtml(pick(rec, ['channel_name', 'channel']))
+  const ref = stripHtml(pick(rec, ORDER_COLUMNS.increment_id))
+  const channelName = stripHtml(pick(rec, ORDER_COLUMNS.channel_name))
   return {
     ref,
     date,
     subtotal,
     total,
-    status: stripHtml(pick(rec, ['status', 'status_label'])).toLowerCase(),
-    clientName: stripHtml(pick(rec, ['full_name', 'customer_name', 'billed_to'])),
+    status: stripHtml(pick(rec, ORDER_COLUMNS.status)).toLowerCase(),
+    clientName: stripHtml(pick(rec, ORDER_COLUMNS.full_name)),
     channel: /wholesale|b2b/i.test(channelName) || /^B2B/i.test(ref) ? 'wholesale' : 'retail',
   }
 }
@@ -157,7 +169,7 @@ export async function fetchOrders(
       if (!o) continue
       if (!oldest || o.date < oldest) oldest = o.date
       if (o.date < opts.since || (opts.until && o.date > opts.until)) continue
-      if (SKIP_STATUSES.test(o.status)) continue
+      if (!isLiveOrder(o)) continue
       orders.push(o)
     }
     page++
