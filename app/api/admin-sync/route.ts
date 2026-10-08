@@ -5,9 +5,9 @@ import { ensureTables, lastRun, defaultSince, applyOrders, logFailure, bookmarkl
 import { bookmarkletCode } from '@/lib/bookmarklet'
 
 /*
- * Sync USA retail orders straight from admin.barneysfarm.us into sd_orders.
- * Synced orders live in one sd_files row per year ("Admin sync 2026") and replace any
- * uploaded retail orders for the same dates, so uploads and syncs never double-count.
+ * Sync USA retail and wholesale orders straight from admin.barneysfarm.us into sd_orders.
+ * Synced orders live in one sd_files row per year ("Admin sync 2026", "Admin sync wholesale 2026") and replace any
+ * uploaded orders of the same channel and dates, so uploads and syncs never double-count.
  *
  * GET  (dashboard session)        → is the sync set up, the last run, and this user's bookmarklet
  * GET  (Vercel cron, CRON_SECRET) → run the default sync

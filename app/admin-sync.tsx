@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-/* "Sync from admin" bar for the USA tab: pulls retail orders from admin.barneysfarm.us,
+/* "Sync from admin" bar for the USA tab: pulls retail and wholesale orders from admin.barneysfarm.us,
    either from the server (needs the Cloudflare token) or via the BF Sales Sync bookmarklet */
 
 interface LastRun { ran_at: string; ran_by: string; ok: boolean; complete: boolean; message: string }
@@ -50,7 +50,7 @@ export default function AdminSync({ onSynced }: { onSynced: () => Promise<void> 
         const data = await res.json().catch(() => ({ error: res.statusText }))
         if (!res.ok) { setError(data.error || `Sync failed (${res.status})`); break }
         total += data.orders || 0
-        if (data.complete) { setStatus(`Synced ${total.toLocaleString('en-US')} retail orders from the admin.`); break }
+        if (data.complete) { setStatus(`Synced ${total.toLocaleString('en-US')} orders from the admin.`); break }
         setStatus(`Synced back to ${data.from} (${total.toLocaleString('en-US')} orders so far)…`)
         body = data.next
       }
