@@ -44,35 +44,37 @@ export async function defaultSince() {
   return addDays(from.toISOString().slice(0, 10), rows[0] ? -OVERLAP_DAYS : 0)
 }
 
-/* Replace retail orders dated [from, to] with the synced ones. */
-export async function saveOrders(orders: { date: string; subtotal: number; total: number; clientName: string }[], from: string, to: string, by: string) {
+type Channel = AdminOrder['channel']
+
+/* Replace one channel's orders dated [from, to] with the synced ones. */
+export async function saveOrders(orders: { date: string; subtotal: number; total: number; clientName: string }[], channel: Channel, from: string, to: string, by: string) {
   const sql = neon(process.env.DATABASE_URL!)
   const firstYear = Number(from.slice(0, 4)), lastYear = Number(to.slice(0, 4))
   for (let year = firstYear; year <= lastYear; year++) {
     const lo = from > `${year}-01-01` ? from : `${year}-01-01`
     const hi = to < `${year}-12-31` ? to : `${year}-12-31`
     const yearOrders = orders.filter(o => o.date >= lo && o.date <= hi)
-    const filename = `Admin sync ${year}`
+    const filename = channel === 'retail' ? `Admin sync ${year}` : `Admin sync ${channel} ${year}`
 
     const [file] = await sql`
       INSERT INTO sd_files (filename, region, channel, file_type, uploaded_by)
-      VALUES (${filename}, ${REGION}, 'retail', 'orders', ${by})
+      VALUES (${filename}, ${REGION}, ${channel}, 'orders', ${by})
       ON CONFLICT (region, filename) DO UPDATE SET uploaded_by = EXCLUDED.uploaded_by, uploaded_at = NOW()
       RETURNING id
     `
     const fileId = file.id as number
 
-    // Drop this file's orders and any uploaded retail orders for the same dates
+    // Drop this file's orders and any uploaded orders of this channel for the same dates
     await sql`
       DELETE FROM sd_orders o USING sd_files f
-      WHERE o.file_id = f.id AND f.region = ${REGION} AND o.channel = 'retail'
+      WHERE o.file_id = f.id AND f.region = ${REGION} AND o.channel = ${channel}
         AND o.order_date >= ${lo}::date AND o.order_date <= ${hi}::date
     `
     if (yearOrders.length > 0) {
       const rows = JSON.stringify(yearOrders.map(o => ({ d: o.date, s: o.subtotal, t: o.total, n: o.clientName })))
       await sql`
         INSERT INTO sd_orders (file_id, order_date, subtotal, total, tax, channel, is_count_only, order_count, client_name)
-        SELECT ${fileId}, x.d, x.s, x.t, 0, 'retail', FALSE, 1, COALESCE(x.n, '')
+        SELECT ${fileId}, x.d, x.s, x.t, 0, ${channel}, FALSE, 1, COALESCE(x.n, '')
         FROM jsonb_to_recordset(${rows}::jsonb) AS x(d date, s numeric, t numeric, n text)
       `
     }
@@ -105,19 +107,22 @@ export async function emailForKey(key: string) {
 /* Save orders read in full for [from, to] and log the run. Throws AdminError when it refuses. */
 export async function applyOrders(orders: AdminOrder[], from: string, to: string, by: string, complete: boolean, until: string | null) {
   const sql = neon(process.env.DATABASE_URL!)
-  const retail = orders.filter(o => o.channel === 'retail')
-  const wholesaleSkipped = orders.length - retail.length
   if (orders.length === 0 && addDays(from, 2) <= to) {
     throw new AdminError(`The admin returned no orders for ${from} to ${to}, so the dashboard was left as it was.`)
   }
-  if (from <= to) await saveOrders(retail, from, to, by)
-  const message = `${retail.length.toLocaleString('en-US')} retail orders, ${from} to ${to}` +
-    (wholesaleSkipped ? ` (${wholesaleSkipped} wholesale orders left out)` : '')
+  const retail = orders.filter(o => o.channel === 'retail')
+  const wholesale = orders.filter(o => o.channel === 'wholesale')
+  if (from <= to) {
+    await saveOrders(retail, 'retail', from, to, by)
+    await saveOrders(wholesale, 'wholesale', from, to, by)
+  }
+  const n = (x: number) => x.toLocaleString('en-US')
+  const message = `${n(retail.length)} retail and ${n(wholesale.length)} wholesale orders, ${from} to ${to}`
   await sql`
     INSERT INTO sd_admin_sync_runs (ran_by, ok, complete, date_from, date_to, orders, message)
-    VALUES (${by}, TRUE, ${complete}, ${from}, ${until}, ${retail.length}, ${message})
+    VALUES (${by}, TRUE, ${complete}, ${from}, ${until}, ${orders.length}, ${message})
   `
-  return { orders: retail.length, message }
+  return { orders: orders.length, message }
 }
 
 export async function logFailure(by: string, since: string | null, until: string | null, message: string) {
