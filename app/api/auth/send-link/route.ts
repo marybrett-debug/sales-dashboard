@@ -6,6 +6,8 @@ const ALLOWED_EMAILS = new Set([
   'mary@barneysfarm.com',
   'derry@barneysfarm.com',
   'sissi@barneysfarm.com',
+  'anthony@barneysfarm.com',
+  'howard@barneysfarm.com',
   'mary.brett@gmail.com',
   'brett.dermot@gmail.com',
 ])
