@@ -761,6 +761,7 @@ function AuthGate() {
 const COMPETITOR_URL = 'https://barneys-competitor-monitor-9q5k.vercel.app'
 const SHIPDASH_URL = 'https://web-production-bb7a.up.railway.app'
 const MARKETING_URL = 'https://barneys-marketing-dashboard.vercel.app'
+const SEED_FORECAST_URL = 'http://localhost:4400/'
 
 function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
   const [view, setView] = useState<'home' | 'sales' | 'cogs'>('home')
@@ -856,6 +857,18 @@ function Home({ email, onLogout }: { email: string; onLogout: () => void }) {
           <div className="text-4xl mb-3">📦</div>
           <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Ship Dash ↗</div>
           <p className="text-sm text-gray-500 mt-1">Shipping and fulfilment tracking.</p>
+        </a>
+
+        <a
+          href={SEED_FORECAST_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group rounded-2xl border-2 border-gray-200 bg-white p-8 text-left hover:border-brand-500 hover:shadow-lg transition-all block"
+        >
+          <div className="text-4xl mb-3">🌱</div>
+          <div className="text-lg font-bold text-gray-900 group-hover:text-brand-600">Seed Forecast ↗</div>
+          <p className="text-sm text-gray-500 mt-1">Seed stock forecasting and reorder planning.</p>
+          <p className="text-xs text-gray-400 mt-2">Opens only on the computer running Seed Forecast.</p>
         </a>
       </div>
 
