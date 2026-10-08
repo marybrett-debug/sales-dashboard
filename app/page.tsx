@@ -990,7 +990,9 @@ function RegionDashboard({ region }: { region: Region }) {
       const getYd = (y: number) => { if (!updated.has(y)) updated.set(y, { year: y, orders: [], strains: [], files: [] }); return updated.get(y)! }
 
       for (const o of data.orders) {
-        const date = new Date(o.order_date)
+        // order_date is a plain YYYY-MM-DD; read it as a local day so PT doesn't shift it to the day before
+        const [oy, om, od] = String(o.order_date).slice(0, 10).split('-').map(Number)
+        const date = new Date(oy, om - 1, od)
         if (isNaN(date.getTime())) continue
         const y = date.getFullYear(), yd = getYd(y), fname = o.filename as string
         if (!yd.files.includes(fname)) yd.files.push(fname)

@@ -205,7 +205,7 @@ export async function GET(req: NextRequest) {
     const fileIds = files.map(f => f.id as number)
 
     const orders = await sql`
-      SELECT o.file_id, o.order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, o.order_count, o.client_name, f.filename
+      SELECT o.file_id, o.order_date::text AS order_date, o.subtotal, o.total, o.tax, o.channel, o.is_count_only, o.order_count, o.client_name, f.filename
       FROM sd_orders o JOIN sd_files f ON f.id = o.file_id
       WHERE o.file_id = ANY(${fileIds}) ORDER BY o.order_date
     `
