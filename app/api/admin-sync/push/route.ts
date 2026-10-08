@@ -7,7 +7,8 @@ import { ensureTables, defaultSince, applyOrders, logFailure, emailForKey } from
  * Authorised by the per-user bookmarklet key, not a dashboard session (the admin page has none).
  *
  * GET  ?key=…  → the date the bookmarklet should offer as its start date
- * POST         → { key, since, keys, rows } as text/plain (a fetch, or a form post fallback)
+ * POST         → { key, since, until?, keys, rows } as text/plain (a fetch, or a form post fallback).
+ *                A long sync arrives as several posts, each covering whole days [since, until].
  */
 
 export const maxDuration = 60
@@ -36,7 +37,7 @@ function page(req: NextRequest, ok: boolean, text: string) {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { key?: string; since?: string; keys?: string[]; rows?: string[][]; x?: string }
+  let body: { key?: string; since?: string; until?: string; keys?: string[]; rows?: string[][]; x?: string }
   try { body = JSON.parse(await req.text()) } catch { return NextResponse.json({ error: 'The sync data was cut off or unreadable.' }, { status: 400, headers: CORS }) }
   const viaForm = body.x !== undefined
   const respond = (ok: boolean, json: Record<string, unknown>, status: number) =>
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
   if (!email) return respond(false, { error: 'This bookmarklet is out of date. Drag a new one from the sales dashboard.' }, 401)
   const since = /^\d{4}-\d{2}-\d{2}$/.test(body.since || '') ? body.since! : null
   if (!since) return respond(false, { error: 'Missing start date.' }, 400)
+  const until = /^\d{4}-\d{2}-\d{2}$/.test(body.until || '') ? body.until! : null
   const by = `${email} (bookmarklet)`
 
   try {
@@ -60,13 +62,14 @@ export async function POST(req: NextRequest) {
       throw new AdminError('The orders grid did not come back newest first, so nothing was changed.')
     }
     const today = new Date().toISOString().slice(0, 10)
-    const to = orders[0] && orders[0].date > today ? orders[0].date : today
-    const saved = await applyOrders(orders.filter(o => o.date >= since && isLiveOrder(o)), since, to, by, true, null)
+    const to = until ?? (orders[0] && orders[0].date > today ? orders[0].date : today)
+    const inRange = orders.filter(o => o.date >= since && o.date <= to && isLiveOrder(o))
+    const saved = await applyOrders(inRange, since, to, by, true, until)
     return respond(true, { ok: true, ...saved }, 200)
   } catch (e) {
     const message = e instanceof AdminError ? e.message : `Saving failed: ${(e as Error).message}`
     console.error('[admin-sync/push]', message)
-    await logFailure(by, since, null, message)
+    await logFailure(by, since, until, message)
     return respond(false, { error: message }, e instanceof AdminError ? 422 : 500)
   }
 }
