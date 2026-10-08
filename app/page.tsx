@@ -8,6 +8,7 @@ import {
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import CogsDashboard from './cogs'
+import AdminSync from './admin-sync'
 
 /* ── types ───────────────────────────────────────────────── */
 
@@ -1206,6 +1207,7 @@ function RegionDashboard({ region }: { region: Region }) {
         <h2 className="font-semibold text-gray-800">{REGION_CONFIG[region].emoji} Upload {REGION_CONFIG[region].label} Reports</h2>
         {years.length > 0 && <span className="text-xs text-gray-500">{years.length} year{years.length !== 1 ? 's' : ''}: {years.join(', ')}</span>}
       </div>
+      {region === 'usa' && <AdminSync onSynced={loadFromServer} />}
       <label
         className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-8 cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-colors"
         onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
